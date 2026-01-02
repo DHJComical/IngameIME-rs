@@ -109,8 +109,6 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(wgpu) = &mut self.wgpu {
-                    debug!("Starting render pass");
-
                     let output = wgpu.surface.get_current_texture().unwrap();
                     let view = output
                         .texture
@@ -142,12 +140,7 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
                     });
                     drop(render_pass);
                     wgpu.queue.submit(Some(encoder.finish()));
-
-                    debug!("Presenting frame");
-
                     output.present();
-
-                    debug!("Render pass complete");
                 }
             }
             WindowEvent::KeyboardInput { .. } => {}
