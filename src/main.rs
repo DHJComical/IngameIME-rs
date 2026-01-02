@@ -72,12 +72,12 @@ impl<'a> Wgpu<'a> {
 }
 
 #[derive(Default)]
-struct WgpuAppHandler<'a> {
-    window: Option<Arc<Window>>,
+struct WinitApp<'a> {
     wgpu: Option<Wgpu<'a>>,
+    window: Option<Arc<Window>>,
 }
 
-impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
+impl<'a> ApplicationHandler for WinitApp<'a> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         info!("Creating application window");
         let attrs = Window::default_attributes()
@@ -91,8 +91,8 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
         info!("Showing application window");
         window.set_visible(true);
 
-        self.window = Some(window);
         self.wgpu = Some(wgpu);
+        self.window = Some(window);
         info!("Application resumed");
     }
 
@@ -158,6 +158,6 @@ fn main() -> Result<(), impl std::error::Error> {
     info!("Starting application");
 
     let el = EventLoop::new().unwrap();
-    let mut app = WgpuAppHandler::default();
+    let mut app = WinitApp::default();
     el.run_app(&mut app)
 }
