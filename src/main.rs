@@ -86,9 +86,7 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
         let window = Arc::new(el.create_window(attrs).unwrap());
 
         info!("Creating WGPU for window");
-        let size = window.inner_size();
-        let mut wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
-        wgpu.resize(size.width, size.height);
+        let wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
 
         info!("Showing application window");
         window.set_visible(true);
