@@ -75,14 +75,114 @@ impl<'a> Wgpu<'a> {
     }
 }
 
+struct Egui {
+    window: Arc<Window>,
+    context: Context,
+    state: State,
+    renderer: Renderer,
+}
+
+impl Egui {
+    fn new(wgpu: &Wgpu, window: Arc<Window>) -> Self {
+        info!("Creating egui context");
+        let context = Context::default();
+
+        info!("Creating egui state");
+        let state = State::new(
+            context.clone(),
+            ViewportId::default(),
+            window.as_ref(),
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+
+        info!("Creating egui renderer");
+        let renderer = Renderer::new(&wgpu.device, wgpu.config.format, RendererOptions::default());
+
+        Self {
+            window,
+            context,
+            state,
+            renderer,
+        }
+    }
+
+    fn render(
+        &mut self,
+        wgpu: &Wgpu,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+    ) {
+        let input = self.state.take_egui_input(&self.window);
+        let full_output = self.context.run(input, |ctx| {
+            // 使用亮色主题
+            ctx.set_visuals(Visuals::light());
+
+            let window = egui::Window::new("Hello egui with WGPU!");
+            window.show(ctx, |ui| {
+                let text = String::from("Hello World!");
+                ui.label(text);
+            });
+        });
+
+        // 图元信息
+        let primitives = self
+            .context
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+        // 屏幕信息
+        let screen_info = ScreenDescriptor {
+            size_in_pixels: [wgpu.config.width, wgpu.config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+        // 更新纹理
+        for (id, image_delta) in &full_output.textures_delta.set {
+            self.renderer
+                .update_texture(&wgpu.device, &wgpu.queue, *id, image_delta);
+        }
+        // 更新缓冲区
+        self.renderer.update_buffers(
+            &wgpu.device,
+            &wgpu.queue,
+            encoder,
+            &primitives,
+            &screen_info,
+        );
+        // 绘制图元
+        {
+            let mut rpass = encoder
+                .begin_render_pass(&RenderPassDescriptor {
+                    label: Some("egui Render Pass"),
+                    color_attachments: &[Some(RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: Operations {
+                            load: LoadOp::Load,
+                            store: StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
+            self.renderer.render(&mut rpass, &primitives, &screen_info);
+        }
+        // 释放纹理
+        for id in &full_output.textures_delta.free {
+            self.renderer.free_texture(id);
+        }
+        // 检查是否需要重绘
+        if self.context.has_requested_repaint() {
+            self.window.request_redraw();
+        }
+    }
+}
+
 #[derive(Default)]
 struct WinitApp<'a> {
     wgpu: Option<Wgpu<'a>>,
     window: Option<Arc<Window>>,
-
-    egui: Context,
-    state: Option<State>,
-    renderer: Option<Renderer>,
+    egui: Option<Egui>,
 }
 
 impl<'a> ApplicationHandler for WinitApp<'a> {
@@ -96,31 +196,20 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
         info!("Creating WGPU for window");
         let wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
 
-        info!("Creating egui state");
-        let state = State::new(
-            self.egui.clone(),
-            ViewportId::default(),
-            window.as_ref(),
-            Some(window.scale_factor() as f32),
-            None,
-            None,
-        );
-
-        info!("Creating egui renderer");
-        let renderer = Renderer::new(&wgpu.device, wgpu.config.format, RendererOptions::default());
+        info!("Creating egui");
+        let egui = Egui::new(&wgpu, window.clone());
 
         info!("Showing application window");
         window.set_visible(true);
 
         self.wgpu = Some(wgpu);
         self.window = Some(window);
-        self.state = Some(state);
-        self.renderer = Some(renderer);
+        self.egui = Some(egui);
         info!("Application resumed");
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        let state = self.state.as_mut().unwrap();
+        let egui = self.egui.as_mut().unwrap();
         let window = self.window.as_ref().unwrap();
 
         match event {
@@ -177,76 +266,8 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                     drop(rpass);
                 }
 
-                // egui 绘制
-                {
-                    let renderer = self.renderer.as_mut().unwrap();
-
-                    let input = state.take_egui_input(&window);
-                    let full_output = self.egui.run(input, |ctx| {
-                        // 使用亮色主题
-                        ctx.set_visuals(Visuals::light());
-
-                        let window = egui::Window::new("Hello egui with WGPU!");
-                        window.show(ctx, |ui| {
-                            let text = String::from("Hello World!");
-                            ui.label(text);
-                        });
-                    });
-
-                    // 图元信息
-                    let primitives = self
-                        .egui
-                        .tessellate(full_output.shapes, full_output.pixels_per_point);
-
-                    // 屏幕尺寸
-                    let screen_desc = ScreenDescriptor {
-                        size_in_pixels: [wgpu.config.width, wgpu.config.height],
-                        pixels_per_point: full_output.pixels_per_point,
-                    };
-
-                    // 更新纹理和缓冲区
-                    {
-                        for (id, image_delta) in &full_output.textures_delta.set {
-                            renderer.update_texture(&wgpu.device, &wgpu.queue, *id, image_delta);
-                        }
-                        renderer.update_buffers(
-                            &wgpu.device,
-                            &wgpu.queue,
-                            &mut encoder,
-                            &primitives,
-                            &screen_desc,
-                        );
-                    }
-                    // 绘制图元
-                    {
-                        let mut rpass = encoder
-                            .begin_render_pass(&RenderPassDescriptor {
-                                label: Some("egui Render Pass"),
-                                color_attachments: &[Some(RenderPassColorAttachment {
-                                    view: &view,
-                                    resolve_target: None,
-                                    depth_slice: None,
-                                    ops: Operations {
-                                        load: LoadOp::Load,
-                                        store: StoreOp::Store,
-                                    },
-                                })],
-                                ..Default::default()
-                            })
-                            .forget_lifetime();
-                        renderer.render(&mut rpass, &primitives, &screen_desc);
-                    }
-                    // 清理不再使用的纹理
-                    {
-                        for id in &full_output.textures_delta.free {
-                            renderer.free_texture(id);
-                        }
-                    }
-                    // 检查是否需要重绘
-                    if self.egui.has_requested_repaint() {
-                        window.request_redraw();
-                    }
-                }
+                // Egui 绘制
+                egui.render(wgpu, &mut encoder, &view);
 
                 wgpu.queue.submit(Some(encoder.finish()));
                 output.present();
@@ -269,7 +290,7 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                 }
             }
             event => {
-                if state.on_window_event(&window, &event).repaint {
+                if egui.state.on_window_event(&window, &event).repaint {
                     window.request_redraw();
                 }
             }
