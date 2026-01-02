@@ -1,5 +1,5 @@
 use log::{debug, info};
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 use wgpu::{
     Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
     InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
@@ -170,7 +170,7 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
     }
 }
 
-fn main() -> Result<(), impl std::error::Error> {
+fn main() -> Result<(), impl Error> {
     env_logger::init();
     info!("Starting application");
 
