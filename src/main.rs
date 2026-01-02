@@ -3,7 +3,8 @@ use std::sync::Arc;
 use wgpu::{
     Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
     InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
-    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureViewDescriptor,
+    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, SurfaceTarget,
+    TextureViewDescriptor,
 };
 use winit::{
     application::ApplicationHandler,
@@ -12,27 +13,23 @@ use winit::{
     window::{Window, WindowId},
 };
 
-struct Wgpu {
-    window: Arc<Window>,
-    surface: Surface<'static>,
+struct Wgpu<'a> {
+    surface: Surface<'a>,
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
-    size_changed: bool,
 }
 
-impl Wgpu {
-    async fn new(window: Arc<Window>) -> Self {
+impl<'a> Wgpu<'a> {
+    async fn new(target: SurfaceTarget<'a>) -> Self {
         info!("Initializing WGPU instance");
         let instance = Instance::new(&InstanceDescriptor {
             backends: Backends::all(),
             ..Default::default()
         });
-        info!("{:?}", instance);
 
         info!("Creating surface");
-        let surface = instance.create_surface(window.clone()).unwrap();
-        info!("{:?}", surface);
+        let surface = instance.create_surface(target).unwrap();
 
         info!("Requesting adapter");
         let adapter = instance
@@ -46,118 +43,113 @@ impl Wgpu {
             .request_device(&DeviceDescriptor::default())
             .await
             .unwrap();
-        info!("{:?}", device);
-        info!("{:?}", queue);
 
-        info!("Acquiring surface configuration");
-        let config = surface
-            .get_default_config(
-                &adapter,
-                window.inner_size().width,
-                window.inner_size().height,
-            )
-            .unwrap();
+        info!("Acquiring default surface configuration");
+        let config = surface.get_default_config(&adapter, 0, 0).unwrap();
         info!("{:?}", config);
 
         info!("WGPU initialization complete");
 
         Self {
-            window,
             surface,
             device,
             queue,
             config,
-            size_changed: true,
         }
     }
 
-    fn render(&mut self) {
-        if self.config.width == 0 || self.config.height == 0 {
-            return;
-        }
-
-        if self.size_changed {
+    /// Resize the surface to the given width and height.
+    /// Must be called once after creation to set the initial size.
+    fn resize(&mut self, width: u32, height: u32) {
+        if width != 0 && height != 0 && (self.config.width != width || self.config.height != height)
+        {
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.size_changed = false;
-            debug!(
-                "Surface size changed to: {}x{}",
-                self.config.width, self.config.height
-            );
         }
-
-        debug!("Starting render pass");
-
-        let output = self.surface.get_current_texture().unwrap();
-        let view = output
-            .texture
-            .create_view(&TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
-        let render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("Render Pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: Operations {
-                    load: LoadOp::Clear(Color {
-                        r: 0.1,
-                        g: 0.2,
-                        b: 0.3,
-                        a: 1.0,
-                    }),
-                    store: StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
-        drop(render_pass);
-        self.queue.submit(Some(encoder.finish()));
-
-        debug!("Presenting frame");
-
-        self.window.pre_present_notify();
-        output.present();
-
-        debug!("Render pass complete");
     }
 }
 
 #[derive(Default)]
-struct WgpuAppHandler {
-    app: Option<Wgpu>,
+struct WgpuAppHandler<'a> {
+    window: Option<Arc<Window>>,
+    surface: Option<Wgpu<'a>>,
 }
 
-impl ApplicationHandler for WgpuAppHandler {
+impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        let attrs = Window::default_attributes().with_title("LearnWgpu");
+        info!("Creating application window");
+        let attrs = Window::default_attributes()
+            .with_title("LearnWgpu")
+            .with_visible(false);
         let window = Arc::new(el.create_window(attrs).unwrap());
-        let app = pollster::block_on(Wgpu::new(window));
-        self.app.replace(app);
+
+        info!("Creating WGPU for window");
+        let size = window.inner_size();
+        let mut wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
+        wgpu.resize(size.width, size.height);
+
+        info!("Showing application window");
+        window.set_visible(true);
+
+        self.window = Some(window);
+        self.surface = Some(wgpu);
+        info!("Application resumed");
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        let app = self.app.as_mut().unwrap();
-
         match event {
             WindowEvent::CloseRequested => {
                 el.exit();
                 info!("Exiting application");
             }
             WindowEvent::Resized(size) => {
-                let config = &mut app.config;
-                config.width = size.width;
-                config.height = size.height;
-                app.size_changed = true;
+                if let Some(surface) = &mut self.surface {
+                    surface.resize(size.width, size.height);
+                }
             }
             WindowEvent::RedrawRequested => {
-                app.render();
-                app.window.request_redraw();
+                if let Some(wgpu) = &mut self.surface {
+                    debug!("Starting render pass");
+
+                    let output = wgpu.surface.get_current_texture().unwrap();
+                    let view = output
+                        .texture
+                        .create_view(&TextureViewDescriptor::default());
+
+                    let mut encoder =
+                        wgpu.device
+                            .create_command_encoder(&CommandEncoderDescriptor {
+                                label: Some("Render Encoder"),
+                            });
+
+                    let render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                        label: Some("Render Pass"),
+                        color_attachments: &[Some(RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color {
+                                    r: 0.1,
+                                    g: 0.2,
+                                    b: 0.3,
+                                    a: 1.0,
+                                }),
+                                store: StoreOp::Store,
+                            },
+                        })],
+                        ..Default::default()
+                    });
+                    drop(render_pass);
+                    wgpu.queue.submit(Some(encoder.finish()));
+
+                    debug!("Presenting frame");
+
+                    output.present();
+
+                    debug!("Render pass complete");
+                }
             }
             WindowEvent::KeyboardInput { .. } => {}
             _ => (),
