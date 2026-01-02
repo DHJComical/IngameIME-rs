@@ -8,9 +8,10 @@ use wgpu::{
 };
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    window::{Window, WindowId},
+    keyboard::{Key, NamedKey},
+    window::{Fullscreen, Window, WindowId},
 };
 
 struct Wgpu<'a> {
@@ -147,7 +148,23 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                     output.present();
                 }
             }
-            WindowEvent::KeyboardInput { .. } => {}
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Named(NamedKey::F11),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                if let Some(window) = &self.window {
+                    if window.fullscreen().is_none() {
+                        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                    } else {
+                        window.set_fullscreen(None);
+                    }
+                }
+            }
             _ => (),
         }
     }
