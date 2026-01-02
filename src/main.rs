@@ -11,6 +11,7 @@ use wgpu::{
 };
 use winit::{
     application::ApplicationHandler,
+    dpi::{PhysicalPosition, PhysicalSize},
     event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
@@ -75,6 +76,10 @@ impl<'a> Wgpu<'a> {
     }
 }
 
+trait EguiMenu {
+    fn render(&mut self, context: &Context);
+}
+
 struct Egui {
     window: Arc<Window>,
     context: Context,
@@ -113,18 +118,22 @@ impl Egui {
         wgpu: &Wgpu,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        ui: &mut dyn EguiMenu,
     ) {
+        // 获取输入并更新界面
         let input = self.state.take_egui_input(&self.window);
         let full_output = self.context.run(input, |ctx| {
-            // 使用亮色主题
-            ctx.set_visuals(Visuals::light());
-
-            let window = egui::Window::new("Hello egui with WGPU!");
-            window.show(ctx, |ui| {
-                let text = String::from("Hello World!");
-                ui.label(text);
-            });
+            ui.render(ctx);
         });
+
+        // 处理输入法光标位置
+        if let Some(ime) = full_output.platform_output.ime {
+            let rect = ime.cursor_rect;
+            self.window.set_ime_cursor_area(
+                PhysicalPosition::new(rect.left(), rect.top()),
+                PhysicalSize::new(rect.width(), rect.height()),
+            );
+        }
 
         // 图元信息
         let primitives = self
@@ -177,12 +186,41 @@ impl Egui {
         }
     }
 }
+struct IngameImeMenu {
+    window: Arc<Window>,
+    text: String,
+}
+
+impl IngameImeMenu {
+    fn new(window: Arc<Window>) -> Self {
+        Self {
+            window,
+            text: String::new(),
+        }
+    }
+}
+
+impl EguiMenu for IngameImeMenu {
+    fn render(&mut self, ctx: &Context) {
+        ctx.set_visuals(Visuals::light());
+
+        egui::Window::new("IngameIME").show(ctx, |ui| {
+            ui.label("Text input with IME support.");
+            if ui.text_edit_multiline(&mut self.text).has_focus() {
+                self.window.set_ime_allowed(true);
+            } else {
+                self.window.set_ime_allowed(false);
+            }
+        });
+    }
+}
 
 #[derive(Default)]
 struct WinitApp<'a> {
     wgpu: Option<Wgpu<'a>>,
     window: Option<Arc<Window>>,
     egui: Option<Egui>,
+    menu: Option<IngameImeMenu>,
 }
 
 impl<'a> ApplicationHandler for WinitApp<'a> {
@@ -199,12 +237,16 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
         info!("Creating egui");
         let egui = Egui::new(&wgpu, window.clone());
 
+        info!("Creating IngameIME menu");
+        let menu = IngameImeMenu::new(window.clone());
+
         info!("Showing application window");
         window.set_visible(true);
 
         self.wgpu = Some(wgpu);
         self.window = Some(window);
         self.egui = Some(egui);
+        self.menu = Some(menu);
         info!("Application resumed");
     }
 
@@ -267,7 +309,10 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                 }
 
                 // Egui 绘制
-                egui.render(wgpu, &mut encoder, &view);
+                {
+                    let menu = self.menu.as_mut().unwrap();
+                    egui.render(wgpu, &mut encoder, &view, menu);
+                }
 
                 wgpu.queue.submit(Some(encoder.finish()));
                 output.present();
@@ -281,12 +326,10 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                     },
                 ..
             } => {
-                if let Some(window) = &self.window {
-                    if window.fullscreen().is_none() {
-                        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-                    } else {
-                        window.set_fullscreen(None);
-                    }
+                if window.fullscreen().is_none() {
+                    window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                } else {
+                    window.set_fullscreen(None);
                 }
             }
             event => {
