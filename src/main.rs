@@ -61,12 +61,13 @@ impl<'a> Wgpu<'a> {
     /// Resize the surface to the given width and height.
     /// Must be called once after creation to set the initial size.
     fn resize(&mut self, width: u32, height: u32) {
-        if width != 0 && height != 0 && (self.config.width != width || self.config.height != height)
-        {
+        if self.config.width != width || self.config.height != height {
             debug!("Resizing surface to {}x{}", width, height);
             self.config.width = width;
             self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
+            if width != 0 && height != 0 {
+                self.surface.configure(&self.device, &self.config);
+            }
         }
     }
 }
@@ -109,6 +110,10 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(wgpu) = &mut self.wgpu {
+                    if wgpu.config.width == 0 || wgpu.config.height == 0 {
+                        return;
+                    }
+
                     let output = wgpu.surface.get_current_texture().unwrap();
                     let view = output
                         .texture
