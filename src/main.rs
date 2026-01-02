@@ -22,7 +22,7 @@ struct Wgpu {
 }
 
 impl Wgpu {
-    async fn new(target: Arc<Window>) -> Self {
+    async fn new(window: Arc<Window>) -> Self {
         info!("Initializing WGPU instance");
         let instance = Instance::new(&InstanceDescriptor {
             backends: Backends::all(),
@@ -31,7 +31,7 @@ impl Wgpu {
         info!("{:?}", instance);
 
         info!("Creating surface");
-        let surface = instance.create_surface(target.clone()).unwrap();
+        let surface = instance.create_surface(window.clone()).unwrap();
         info!("{:?}", surface);
 
         info!("Requesting adapter");
@@ -53,8 +53,8 @@ impl Wgpu {
         let config = surface
             .get_default_config(
                 &adapter,
-                target.inner_size().width,
-                target.inner_size().height,
+                window.inner_size().width,
+                window.inner_size().height,
             )
             .unwrap();
         info!("{:?}", config);
@@ -62,7 +62,7 @@ impl Wgpu {
         info!("WGPU initialization complete");
 
         Self {
-            window: target,
+            window,
             surface,
             device,
             queue,
