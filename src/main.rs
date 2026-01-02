@@ -46,7 +46,7 @@ impl<'a> Wgpu<'a> {
 
         info!("Acquiring default surface configuration");
         let config = surface.get_default_config(&adapter, 0, 0).unwrap();
-        info!("{:?}", config);
+        debug!("{:?}", config);
 
         info!("WGPU initialization complete");
 
