@@ -104,8 +104,8 @@ impl<'a> ApplicationHandler for WinitApp<'a> {
                 info!("Exiting application");
             }
             WindowEvent::Resized(size) => {
-                if let Some(surface) = &mut self.wgpu {
-                    surface.resize(size.width, size.height);
+                if let Some(wgpu) = &mut self.wgpu {
+                    wgpu.resize(size.width, size.height);
                 }
             }
             WindowEvent::RedrawRequested => {
