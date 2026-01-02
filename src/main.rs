@@ -1,10 +1,9 @@
 use log::{debug, info};
 use std::sync::Arc;
 use wgpu::{
-    Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, ExperimentalFeatures,
-    Features, Instance, InstanceDescriptor, Limits, LoadOp, MemoryHints, Operations,
-    PowerPreference, Queue, RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions,
-    StoreOp, Surface, SurfaceConfiguration, TextureViewDescriptor, Trace,
+    Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
+    InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
+    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureViewDescriptor,
 };
 use winit::{
     application::ApplicationHandler,
@@ -13,7 +12,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-struct WgpuApp {
+struct Wgpu {
     window: Arc<Window>,
     surface: Surface<'static>,
     device: Device,
@@ -22,53 +21,48 @@ struct WgpuApp {
     size_changed: bool,
 }
 
-impl WgpuApp {
-    async fn new(window: Arc<Window>) -> Self {
+impl Wgpu {
+    async fn new(target: Arc<Window>) -> Self {
         info!("Initializing WGPU instance");
         let instance = Instance::new(&InstanceDescriptor {
             backends: Backends::all(),
             ..Default::default()
         });
+        info!("{:?}", instance);
 
-        info!("Creating surface for the window");
-        let surface = instance.create_surface(window.clone()).unwrap();
+        info!("Creating surface");
+        let surface = instance.create_surface(target.clone()).unwrap();
+        info!("{:?}", surface);
 
         info!("Requesting adapter");
         let adapter = instance
-            .request_adapter(&RequestAdapterOptions {
-                power_preference: PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
+            .request_adapter(&RequestAdapterOptions::default())
             .await
             .unwrap();
+        info!("{:?}", adapter.get_info());
 
         info!("Requesting device and queue");
         let (device, queue) = adapter
-            .request_device(&DeviceDescriptor {
-                label: None,
-                required_features: Features::empty(),
-                required_limits: Limits::default(),
-                experimental_features: ExperimentalFeatures::disabled(),
-                memory_hints: MemoryHints::Performance,
-                trace: Trace::Off,
-            })
+            .request_device(&DeviceDescriptor::default())
             .await
             .unwrap();
+        info!("{:?}", device);
+        info!("{:?}", queue);
 
         info!("Acquiring surface configuration");
         let config = surface
             .get_default_config(
                 &adapter,
-                window.inner_size().width,
-                window.inner_size().height,
+                target.inner_size().width,
+                target.inner_size().height,
             )
             .unwrap();
+        info!("{:?}", config);
 
         info!("WGPU initialization complete");
 
         Self {
-            window,
+            window: target,
             surface,
             device,
             queue,
@@ -136,14 +130,14 @@ impl WgpuApp {
 
 #[derive(Default)]
 struct WgpuAppHandler {
-    app: Option<WgpuApp>,
+    app: Option<Wgpu>,
 }
 
 impl ApplicationHandler for WgpuAppHandler {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes().with_title("LearnWgpu");
         let window = Arc::new(el.create_window(attrs).unwrap());
-        let app = pollster::block_on(WgpuApp::new(window));
+        let app = pollster::block_on(Wgpu::new(window));
         self.app.replace(app);
     }
 
@@ -161,11 +155,11 @@ impl ApplicationHandler for WgpuAppHandler {
                 config.height = size.height;
                 app.size_changed = true;
             }
-            WindowEvent::KeyboardInput { .. } => {}
             WindowEvent::RedrawRequested => {
                 app.render();
                 app.window.request_redraw();
             }
+            WindowEvent::KeyboardInput { .. } => {}
             _ => (),
         }
     }
