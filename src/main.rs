@@ -74,7 +74,7 @@ impl<'a> Wgpu<'a> {
 #[derive(Default)]
 struct WgpuAppHandler<'a> {
     window: Option<Arc<Window>>,
-    surface: Option<Wgpu<'a>>,
+    wgpu: Option<Wgpu<'a>>,
 }
 
 impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
@@ -92,7 +92,7 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
         window.set_visible(true);
 
         self.window = Some(window);
-        self.surface = Some(wgpu);
+        self.wgpu = Some(wgpu);
         info!("Application resumed");
     }
 
@@ -103,12 +103,12 @@ impl<'a> ApplicationHandler for WgpuAppHandler<'a> {
                 info!("Exiting application");
             }
             WindowEvent::Resized(size) => {
-                if let Some(surface) = &mut self.surface {
+                if let Some(surface) = &mut self.wgpu {
                     surface.resize(size.width, size.height);
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Some(wgpu) = &mut self.surface {
+                if let Some(wgpu) = &mut self.wgpu {
                     debug!("Starting render pass");
 
                     let output = wgpu.surface.get_current_texture().unwrap();
