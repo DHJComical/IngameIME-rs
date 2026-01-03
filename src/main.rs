@@ -125,14 +125,9 @@ impl Egui {
             ui.render(wgpu, self);
         });
 
-        // 处理输入法光标位置
-        if let Some(ime) = full_output.platform_output.ime {
-            let rect = ime.cursor_rect;
-            wgpu.window.set_ime_cursor_area(
-                PhysicalPosition::new(rect.left(), rect.top()),
-                PhysicalSize::new(rect.width(), rect.height()),
-            );
-        }
+        // 处理平台输出
+        self.state
+            .handle_platform_output(&wgpu.window, full_output.platform_output);
 
         // 图元信息
         let primitives = self
