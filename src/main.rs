@@ -160,7 +160,7 @@ impl Egui {
         {
             let mut rpass = encoder
                 .begin_render_pass(&RenderPassDescriptor {
-                    label: Some("egui Render Pass"),
+                    label: Some("Render Egui"),
                     color_attachments: &[Some(RenderPassColorAttachment {
                         view: &view,
                         resolve_target: None,
@@ -284,7 +284,7 @@ impl<'a> ApplicationHandler for WinitAppHandler<'a> {
                 // 场景绘制
                 {
                     let rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-                        label: Some("Render Pass"),
+                        label: Some("Render Scene"),
                         color_attachments: &[Some(RenderPassColorAttachment {
                             view: &view,
                             resolve_target: None,
