@@ -69,6 +69,7 @@ impl<'a> Wgpu<'a> {
             debug!("Resizing surface to {}x{}", width, height);
             self.config.width = width;
             self.config.height = height;
+            // Surface 设置为 0 尺寸会导致崩溃
             if width != 0 && height != 0 {
                 self.surface.configure(&self.device, &self.config);
             }
@@ -262,7 +263,7 @@ impl<'a> ApplicationHandler for WinitAppHandler<'a> {
                 wgpu.resize(size.width, size.height);
             }
             WindowEvent::RedrawRequested => {
-                // 跳过零尺寸渲染
+                // 渲染 0 尺寸画面会导致崩溃
                 if wgpu.config.width == 0 || wgpu.config.height == 0 {
                     return;
                 }
