@@ -64,7 +64,6 @@ impl<'a> Wgpu<'a> {
         }
     }
 
-    /// Resize the surface to the given width and height.
     fn resize(&mut self, width: u32, height: u32) {
         if self.config.width != width || self.config.height != height {
             debug!("Resizing surface to {}x{}", width, height);
