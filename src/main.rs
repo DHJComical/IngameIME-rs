@@ -10,7 +10,6 @@ use wgpu::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::{PhysicalPosition, PhysicalSize},
     event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
