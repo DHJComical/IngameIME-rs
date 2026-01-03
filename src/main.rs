@@ -232,6 +232,7 @@ impl WinitApp<'_> {
         info!("Showing application window");
         window.set_visible(true);
 
+        info!("WinitApp initialized");
         Self { wgpu, egui, menu }
     }
 }
@@ -244,7 +245,6 @@ struct WinitAppHandler<'a> {
 impl<'a> ApplicationHandler for WinitAppHandler<'a> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         self.app = Some(WinitApp::new(el));
-        info!("Application resumed");
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
