@@ -1,9 +1,17 @@
 {
     "cSpell.words": [
         "Egui",
+        "GWLP",
+        "himc",
+        "IACE",
         "Ingame",
+        "ingameime",
+        "lpfdw",
         "rpass",
+        "SHOWUICANDIDATEWINDOW",
+        "SHOWUICOMPOSITIONWINDOW",
         "wgpu",
-        "Winit"
+        "Winit",
+        "WNDPROC"
     ]
 }
