@@ -1,5 +1,4 @@
 use std::char::decode_utf16;
-use std::ffi::CStr;
 use std::ptr;
 use std::slice::from_raw_parts;
 
