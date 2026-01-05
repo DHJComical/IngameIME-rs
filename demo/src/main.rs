@@ -208,32 +208,30 @@ struct WinitApp<'a> {
 
 impl WinitApp<'_> {
     fn new(el: &ActiveEventLoop) -> Self {
-        info!("Creating application window");
+        info!("Create application window");
         let attrs = Window::default_attributes()
             .with_title("LearnWgpu")
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).unwrap());
 
-        info!("Creating WGPU for window");
+        info!("Create Wgpu for window");
         let wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
 
-        info!("Creating egui");
+        info!("Create Egui");
         let egui = Egui::new(&wgpu);
 
-        info!("Creating IngameIME InputContext");
-
-        let input = if let RawWindowHandle::Win32(handle) =
-            unsafe { window.window_handle_any_thread().unwrap().as_raw() }
-        {
-            Imm32InputContext::new(handle.hwnd).unwrap()
-        } else {
-            panic!("Unsupported platform");
+        info!("Create InputContext");
+        let input = match unsafe { window.window_handle_any_thread().unwrap().as_raw() } {
+            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd).unwrap(),
+            _ => {
+                panic!("Unsupported platform");
+            }
         };
 
-        info!("Creating IngameIME menu");
+        info!("Create Ui");
         let menu = IngameImeMenu::default();
 
-        info!("Showing application window");
+        info!("Show application window");
         window.set_visible(true);
 
         info!("WinitApp initialized");
