@@ -77,7 +77,7 @@ impl<'a> Wgpu<'a> {
 }
 
 trait EguiMenu {
-    fn render(&mut self, wgpu: &Wgpu, egui: &Egui);
+    fn render(&mut self, context: &Context);
 }
 
 struct Egui {
@@ -120,8 +120,8 @@ impl Egui {
     ) {
         // 获取输入并更新界面
         let input = self.state.take_egui_input(&wgpu.window);
-        let full_output = self.context.run(input, |_| {
-            ui.render(wgpu, self);
+        let full_output = self.context.run(input, |context| {
+            ui.render(context);
         });
 
         // 处理平台输出
@@ -186,16 +186,12 @@ struct IngameImeMenu {
 }
 
 impl EguiMenu for IngameImeMenu {
-    fn render(&mut self, wgpu: &Wgpu, egui: &Egui) {
-        egui.context.set_visuals(Visuals::light());
+    fn render(&mut self, context: &Context) {
+        context.set_visuals(Visuals::light());
 
-        egui::Window::new("IngameIME").show(&egui.context, |ui| {
+        egui::Window::new("IngameIME").show(&context, |ui| {
             ui.label("Text input with IME support.");
-            if ui.text_edit_multiline(&mut self.text).has_focus() {
-                wgpu.window.set_ime_allowed(true);
-            } else {
-                wgpu.window.set_ime_allowed(false);
-            }
+            if ui.text_edit_multiline(&mut self.text).has_focus() {}
         });
     }
 }

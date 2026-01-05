@@ -2,6 +2,7 @@ use std::char::decode_utf16;
 use std::ptr;
 use std::slice::from_raw_parts;
 
+use log::{debug, error, info, warn};
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::UI::Input::Ime::{
     CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
@@ -38,6 +39,7 @@ unsafe extern "system" fn ingame_ime_proc(
 
             match msg {
                 WM_INPUTLANGCHANGE => {
+                    debug!("WM_INPUTLANGCHANGE");
                     // notify input method change
                     if let Some(cb) = &context.input_method_cb {
                         cb(context.get_input_method());
@@ -49,11 +51,13 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_SETCONTEXT => {
+                    debug!("WM_SETCONTEXT");
                     // hide preedit window and candidate window
                     lparam.0 &= !(ISC_SHOWUICOMPOSITIONWINDOW | ISC_SHOWUICANDIDATEWINDOW) as isize;
                     return DefWindowProcW(hwnd, msg, wparam, lparam);
                 }
                 WM_IME_STARTCOMPOSITION => {
+                    debug!("WM_IME_STARTCOMPOSITION");
                     // preedit event: begin
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::Begin);
@@ -61,6 +65,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_COMPOSITION => {
+                    debug!("WM_IME_COMPOSITION");
                     // preedit event: update
                     if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_COMPSTR | GCS_CURSORPOS)
                     {
@@ -73,6 +78,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_ENDCOMPOSITION => {
+                    debug!("WM_IME_ENDCOMPOSITION");
                     // preedit event: end
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::End);
@@ -85,22 +91,26 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 WM_IME_NOTIFY => match wparam.0 as u32 {
                     IMN_OPENCANDIDATE => {
+                        debug!("IMN_OPENCANDIDATE");
                         if let Some(cb) = &context.candidate_cb {
                             cb(CandidateEvent::Begin);
                         }
                         return LRESULT(1);
                     }
                     IMN_CHANGECANDIDATE => {
+                        debug!("IMN_CHANGECANDIDATE");
                         context.run_candidate_update();
                         return LRESULT(1);
                     }
                     IMN_CLOSECANDIDATE => {
+                        debug!("IMN_CLOSECANDIDATE");
                         if let Some(cb) = &context.candidate_cb {
                             cb(CandidateEvent::End);
                         }
                         return LRESULT(1);
                     }
                     IMN_SETCONVERSIONMODE => {
+                        debug!("IMN_SETCONVERSIONMODE");
                         // notify input mode change
                         if let Some(cb) = &context.input_mode_cb {
                             cb(context.get_input_mode());
@@ -112,6 +122,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     }
                 },
                 WM_IME_CHAR => {
+                    debug!("WM_IME_CHAR");
                     // commit already handled in WM_IME_COMPOSITION, prevent from multiple conversion
                     return LRESULT(1);
                 }
@@ -122,6 +133,7 @@ unsafe extern "system" fn ingame_ime_proc(
             }
         }
 
+        warn!("Unable to GetPropW for IngameIME_Userdata");
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 }
@@ -141,21 +153,22 @@ pub struct Imm32InputContext {
 
 impl Imm32InputContext {
     pub fn new(hwnd: HWND) -> Option<Box<dyn InputContext>> {
+        info!("Creating Imm32InputContext...");
         unsafe {
-            // create our own himc
+            debug!("Create HIMC.");
             let himc = ImmCreateContext();
             if !himc.is_invalid() {
-                // associate a NULL himc to disable ime
+                debug!("Associate NULL HIMC to disable IME");
                 let prev = ImmAssociateContext(hwnd, HIMC::default());
 
-                // replace wndproc
+                debug!("Replace WNDPROC");
                 let proc: WNDPROC = std::mem::transmute(SetWindowLongPtrW(
                     hwnd,
                     GWLP_WNDPROC,
                     ingame_ime_proc as isize,
                 ));
 
-                // create context
+                debug!("Create context");
                 let context = Box::new(Imm32InputContext {
                     hwnd,
                     prev,
@@ -169,15 +182,23 @@ impl Imm32InputContext {
                     input_mode_cb: None,
                 });
 
-                // save userdata for wndproc
-                let _ = SetPropW(
+                debug!("Save userdata for WNDPROC");
+                match SetPropW(
                     hwnd,
                     w!("IngameIME_Userdata"),
                     std::mem::transmute(ptr::addr_of!(context) as u128),
-                );
-
-                Some(context)
+                ) {
+                    Ok(_) => {
+                        info!("Imm32InputContext has created.");
+                        Some(context)
+                    }
+                    Err(e) => {
+                        error!("Unable to SetPropW for IngameIME_Userdata: {e} at new.");
+                        None
+                    }
+                }
             } else {
+                error!("Unable to create HIMC at new.");
                 None
             }
         }
@@ -187,7 +208,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCompositionStringW(self.himc, GCS_COMPSTR, None, 0);
             if size > 0 {
-                // preedit text
+                debug!("Get Preedit");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCompositionStringW(
                     self.himc,
@@ -200,10 +221,10 @@ impl Imm32InputContext {
                     .map(|r| r.unwrap_or('�'))
                     .collect();
 
-                // cursor pos
+                debug!("Get Cursor Pos");
                 let cursor = ImmGetCompositionStringW(self.himc, GCS_CURSORPOS, None, 0) as usize;
 
-                // preedit event: update
+                debug!("Notify PreEditEvent: Updated");
                 if let Some(cb) = &self.preedit_cb {
                     cb(PreEditEvent::Update(PreEdit { text, cursor }));
                 }
@@ -215,7 +236,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCompositionStringW(self.himc, GCS_RESULTSTR, None, 0);
             if size > 0 {
-                // commit string
+                debug!("Get Commit String");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCompositionStringW(
                     self.himc,
@@ -228,7 +249,7 @@ impl Imm32InputContext {
                     .map(|r| r.unwrap_or('�'))
                     .collect();
 
-                // commit event
+                debug!("Notify CommitEvent");
                 if let Some(cb) = &self.commit_cb {
                     cb(text);
                 }
@@ -240,6 +261,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCandidateListW(self.himc, 0, None, 0);
             if size > 0 {
+                debug!("Get Candidates");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCandidateListW(self.himc, 0, Some(buffer.as_mut_ptr() as _), size);
 
@@ -275,7 +297,7 @@ impl Imm32InputContext {
                 // convert absolute pos to relative pos
                 let selected = (candidate.dwSelection - candidate.dwPageStart) as usize;
 
-                // candidate event: update
+                debug!("Notify CandidateEvent: Update");
                 if let Some(cb) = &self.candidate_cb {
                     cb(CandidateEvent::Update(Candidate {
                         candidates,
@@ -294,6 +316,7 @@ impl InputContext for Imm32InputContext {
 
     fn get_input_mode(&self) -> InputMode {
         unsafe {
+            debug!("Get InputMode");
             let mut mode = IME_CONVERSION_MODE(0);
             let _ = ImmGetConversionStatus(self.himc, Some(&mut mode as *mut _), None);
             if mode.contains(IME_CMODE_NATIVE) {
@@ -313,9 +336,11 @@ impl InputContext for Imm32InputContext {
             self.activated = activated;
             unsafe {
                 if self.activated {
+                    info!("Set Activated.");
                     // associate our himc to turn on ime
                     ImmAssociateContext(self.hwnd, self.himc);
                 } else {
+                    info!("Set De-activated.");
                     // notify ime that we are going to turn off
                     let _ = ImmNotifyIME(self.himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
                     ImmAssociateContext(self.hwnd, HIMC::default());
@@ -334,6 +359,7 @@ impl InputContext for Imm32InputContext {
     }
 
     fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
+        debug!("Set CandidateWindow Pos");
         // candidate window
         unsafe {
             let mut candidate = CANDIDATEFORM::default();
@@ -348,7 +374,7 @@ impl InputContext for Imm32InputContext {
             };
             let _ = ImmSetCandidateWindow(self.himc, &candidate);
         }
-        // preedit window
+        debug!("Set PreEditWindow Pos");
         unsafe {
             let mut composition = COMPOSITIONFORM::default();
             composition.dwStyle = CFS_RECT;
@@ -388,16 +414,23 @@ impl InputContext for Imm32InputContext {
 impl Drop for Imm32InputContext {
     fn drop(&mut self) {
         unsafe {
+            info!("Dropping Imm32InputContext...");
             // disable ime
             self.set_activated(false);
             // restore previous wndproc
             SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, std::mem::transmute(self.proc));
             // clear pointer which will be invalid
-            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Some(HANDLE::default()));
+            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Some(HANDLE::default()))
+                .inspect_err(|e| {
+                    error!("Unable to SetPropW for IngameIME_Userdata: {e} at drop");
+                });
             // restore previous himc
             ImmAssociateContext(self.hwnd, self.prev);
             // destroy context
-            let _ = ImmDestroyContext(self.himc);
+            if (!ImmDestroyContext(self.himc)).into() {
+                error!("Unable to destroy HIMC");
+            }
+            info!("Imm32InputContext dropped.");
         }
     }
 }
