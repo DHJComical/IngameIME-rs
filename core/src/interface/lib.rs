@@ -34,23 +34,23 @@ pub enum CandidateEvent {
 }
 pub type CandidateCallback = Box<dyn Fn(CandidateEvent)>;
 
-pub struct InputMethodInfo {
-    /// The unique identifier for the input method.
+pub struct InputSource {
+    /// The unique identifier for the input source.
     pub name: String,
-    /// The localized name of the input method.
+    /// The localized name of the input source.
     pub localized_name: String,
-    /// The language code associated with the input method.
-    pub language: String,
-    /// The localized language name associated with the input method.
-    pub localized_language: String,
+    /// The locale associated with the input source.
+    pub locale: String,
+    /// The localized locale name associated with the input source.
+    pub localized_locale: String,
 }
 
-pub enum InputMethod {
-    /// The input method retrieve is not supported.
+pub enum InputSourceInfo {
+    /// The input source retrieve is not supported.
     Unsupported,
-    Info(InputMethodInfo),
+    Supported(InputSource),
 }
-pub type InputMethodCallback = Box<dyn Fn(InputMethod)>;
+pub type InputSourceCallback = Box<dyn Fn(InputSourceInfo)>;
 
 pub enum InputMode {
     /// Input mode retrieve is not supported.
@@ -64,7 +64,7 @@ pub type InputModeCallback = Box<dyn Fn(InputMode)>;
 
 pub trait InputContext {
     /// Retrieves active input method
-    fn get_input_method(&self) -> InputMethod;
+    fn get_input_method(&self) -> InputSourceInfo;
 
     /// Retrieves the current input mode.
     fn get_input_mode(&self) -> InputMode;
@@ -80,6 +80,6 @@ pub trait InputContext {
     fn set_commit_callback(&mut self, callback: CommitCallback);
     fn set_preedit_callback(&mut self, callback: PreEditCallback);
     fn set_candidate_callback(&mut self, callback: CandidateCallback);
-    fn set_input_method_callback(&mut self, callback: InputMethodCallback);
+    fn set_input_source_callback(&mut self, callback: InputSourceCallback);
     fn set_input_mode_callback(&mut self, callback: InputModeCallback);
 }

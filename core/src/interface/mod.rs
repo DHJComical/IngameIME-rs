@@ -1,2 +1,2 @@
-mod lib;
-mod imm32;
+pub mod lib;
+pub mod imm32;

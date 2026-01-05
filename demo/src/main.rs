@@ -1,18 +1,21 @@
 use egui::{Context, ViewportId, Visuals};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use egui_winit::State;
+use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
 use log::{debug, info};
 use std::{error::Error, sync::Arc};
 use wgpu::{
     Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
     InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
     RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureViewDescriptor,
+    rwh::RawWindowHandle,
 };
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
+    platform::windows::WindowExtWindows,
     window::{Fullscreen, Window, WindowId},
 };
 
@@ -199,6 +202,7 @@ impl EguiMenu for IngameImeMenu {
 struct WinitApp<'a> {
     wgpu: Wgpu<'a>,
     egui: Egui,
+    input: Box<dyn InputContext>,
     menu: IngameImeMenu,
 }
 
@@ -216,6 +220,16 @@ impl WinitApp<'_> {
         info!("Creating egui");
         let egui = Egui::new(&wgpu);
 
+        info!("Creating IngameIME InputContext");
+
+        let input = if let RawWindowHandle::Win32(handle) =
+            unsafe { window.window_handle_any_thread().unwrap().as_raw() }
+        {
+            Imm32InputContext::new(handle.hwnd).unwrap()
+        } else {
+            panic!("Unsupported platform");
+        };
+
         info!("Creating IngameIME menu");
         let menu = IngameImeMenu::default();
 
@@ -223,7 +237,12 @@ impl WinitApp<'_> {
         window.set_visible(true);
 
         info!("WinitApp initialized");
-        Self { wgpu, egui, menu }
+        Self {
+            wgpu,
+            egui,
+            input,
+            menu,
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use std::char::decode_utf16;
-use std::ptr;
+use std::num::NonZeroIsize;
 use std::slice::from_raw_parts;
 
 use log::{debug, error, info, warn};
@@ -21,8 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use crate::interface::lib::{
-    Candidate, CandidateCallback, CandidateEvent, CommitCallback, InputContext, InputMethod,
-    InputMethodCallback, InputMode, InputModeCallback, PreEdit, PreEditCallback, PreEditEvent,
+    Candidate, CandidateCallback, CandidateEvent, CommitCallback, InputContext, InputMode,
+    InputModeCallback, InputSourceCallback, InputSourceInfo, PreEdit, PreEditCallback,
+    PreEditEvent,
 };
 
 #[allow(dead_code)]
@@ -35,13 +36,13 @@ unsafe extern "system" fn ingame_ime_proc(
     unsafe {
         let handle = GetPropW(hwnd, w!("IngameIME_Userdata"));
         if !handle.is_invalid() {
-            let context = *(handle.0 as *const &Imm32InputContext);
+            let context = &*(handle.0 as *const Imm32InputContext);
 
             match msg {
                 WM_INPUTLANGCHANGE => {
                     debug!("WM_INPUTLANGCHANGE");
                     // notify input method change
-                    if let Some(cb) = &context.input_method_cb {
+                    if let Some(cb) = &context.input_source_cb {
                         cb(context.get_input_method());
                     }
                     // notify input mode change
@@ -147,14 +148,15 @@ pub struct Imm32InputContext {
     commit_cb: Option<CommitCallback>,
     preedit_cb: Option<PreEditCallback>,
     candidate_cb: Option<CandidateCallback>,
-    input_method_cb: Option<InputMethodCallback>,
+    input_source_cb: Option<InputSourceCallback>,
     input_mode_cb: Option<InputModeCallback>,
 }
 
 impl Imm32InputContext {
-    pub fn new(hwnd: HWND) -> Option<Box<dyn InputContext>> {
+    pub fn new(hwnd: NonZeroIsize) -> Option<Box<dyn InputContext>> {
         info!("Creating Imm32InputContext...");
         unsafe {
+            let hwnd: HWND = std::mem::transmute(hwnd);
             debug!("Create HIMC.");
             let himc = ImmCreateContext();
             if !himc.is_invalid() {
@@ -178,16 +180,13 @@ impl Imm32InputContext {
                     commit_cb: None,
                     preedit_cb: None,
                     candidate_cb: None,
-                    input_method_cb: None,
+                    input_source_cb: None,
                     input_mode_cb: None,
                 });
 
                 debug!("Save userdata for WNDPROC");
-                match SetPropW(
-                    hwnd,
-                    w!("IngameIME_Userdata"),
-                    std::mem::transmute(ptr::addr_of!(context) as u128),
-                ) {
+                let ptr = &*context as *const Imm32InputContext as _;
+                match SetPropW(hwnd, w!("IngameIME_Userdata"), Some(HANDLE(ptr))) {
                     Ok(_) => {
                         info!("Imm32InputContext has created.");
                         Some(context)
@@ -310,8 +309,8 @@ impl Imm32InputContext {
 }
 
 impl InputContext for Imm32InputContext {
-    fn get_input_method(&self) -> InputMethod {
-        InputMethod::Unsupported
+    fn get_input_method(&self) -> InputSourceInfo {
+        InputSourceInfo::Unsupported
     }
 
     fn get_input_mode(&self) -> InputMode {
@@ -402,8 +401,8 @@ impl InputContext for Imm32InputContext {
         self.candidate_cb = Some(callback);
     }
 
-    fn set_input_method_callback(&mut self, callback: InputMethodCallback) {
-        self.input_method_cb = Some(callback);
+    fn set_input_source_callback(&mut self, callback: InputSourceCallback) {
+        self.input_source_cb = Some(callback);
     }
 
     fn set_input_mode_callback(&mut self, callback: InputModeCallback) {

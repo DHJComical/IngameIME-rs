@@ -6,7 +6,7 @@ description = "A demo application for testing JNI wrapper."
 
 [dependencies]
 # IngameIme
-ingameime-core ={ path="../core"}
+ingameime-core = { path = "../core" }
 
 # logging
 log = "0.4.29"
@@ -21,7 +21,7 @@ egui-wgpu = "0.33.3"
 wgpu = "27.0.1"
 
 # Winit
-winit = "0.30.12"
+winit = { version = "0.30.12", features = ["rwh_06"] }
 
 # Utilities
 pollster = "0.4.0"
