@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "CMODE",
         "Egui",
         "GWLP",
         "himc",
@@ -7,6 +8,7 @@
         "Ingame",
         "ingameime",
         "lpfdw",
+        "repr",
         "rpass",
         "SHOWUICANDIDATEWINDOW",
         "SHOWUICOMPOSITIONWINDOW",

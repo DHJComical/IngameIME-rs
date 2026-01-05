@@ -1,3 +1,5 @@
+pub type CommitCallback = Box<dyn Fn(String)>;
+
 pub struct PreEdit {
     /// The text currently being composed.
     pub text: String,
@@ -75,6 +77,7 @@ pub trait InputContext {
     /// Sets the rectangle area for positioning candidate window.
     fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32);
 
+    fn set_commit_callback(&mut self, callback: CommitCallback);
     fn set_preedit_callback(&mut self, callback: PreEditCallback);
     fn set_candidate_callback(&mut self, callback: CandidateCallback);
     fn set_input_method_callback(&mut self, callback: InputMethodCallback);
