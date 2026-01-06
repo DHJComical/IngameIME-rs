@@ -371,6 +371,9 @@ impl InputContext for Imm32InputContext {
     }
 
     fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
+        // empty space is not allowed
+        let width = if width > 0 { width } else { 1 };
+        let height = if height > 0 { height } else { 1 };
         let rect = RECT {
             left: x,
             top: y,
