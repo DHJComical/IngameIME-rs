@@ -1,185 +1,19 @@
-use egui::{Context, PlatformOutput, ViewportId, Visuals};
-use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
-use egui_winit::State;
+mod window;
+use std::error::Error;
+
+use egui::{Context, Visuals};
 use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
 use log::{debug, info};
-use std::{error::Error, sync::Arc};
-use wgpu::{
-    Backends, Color, CommandEncoder, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
-    InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
-    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureView,
-    TextureViewDescriptor, rwh::RawWindowHandle,
-};
+use wgpu::rwh::RawWindowHandle;
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
-    platform::windows::WindowExtWindows,
-    window::{Fullscreen, Window, WindowId},
+    window::WindowId,
 };
 
-struct WgpuWindow<'a> {
-    window: Arc<Window>,
-    surface: Surface<'a>,
-    device: Device,
-    queue: Queue,
-    config: SurfaceConfiguration,
-}
-
-impl<'a> WgpuWindow<'a> {
-    async fn new(window: Arc<Window>) -> Self {
-        info!("Init Wgpu instance");
-        let instance = Instance::new(&InstanceDescriptor {
-            backends: Backends::all(),
-            ..Default::default()
-        });
-
-        info!("Create surface");
-        let surface = instance.create_surface(window.clone()).unwrap();
-
-        info!("Request adapter");
-        let adapter = instance
-            .request_adapter(&RequestAdapterOptions::default())
-            .await
-            .unwrap();
-        info!("{:?}", adapter.get_info());
-
-        info!("Request device and queue");
-        let (device, queue) = adapter
-            .request_device(&DeviceDescriptor::default())
-            .await
-            .unwrap();
-
-        info!("Acquire default surface configuration");
-        let config = surface.get_default_config(&adapter, 0, 0).unwrap();
-        debug!("{:?}", config);
-
-        info!("Wgpu initialized");
-
-        Self {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-        }
-    }
-
-    fn resize(&mut self, width: u32, height: u32) {
-        if self.config.width != width || self.config.height != height {
-            debug!("Resizing surface to {}x{}", width, height);
-            self.config.width = width;
-            self.config.height = height;
-            // Surface 设置为 0 尺寸会导致崩溃
-            if width != 0 && height != 0 {
-                self.surface.configure(&self.device, &self.config);
-            }
-        }
-    }
-}
-
-trait EguiMenu {
-    fn render(&mut self, context: &Context);
-}
-
-struct Egui {
-    context: Context,
-    state: State,
-    renderer: Renderer,
-}
-
-impl Egui {
-    fn new(wgpu: &WgpuWindow) -> Self {
-        info!("Create Egui context");
-        let context = Context::default();
-
-        info!("Create Egui state");
-        let state = State::new(
-            context.clone(),
-            ViewportId::default(),
-            wgpu.window.as_ref(),
-            Some(wgpu.window.scale_factor() as f32),
-            None,
-            None,
-        );
-
-        info!("Create Egui renderer");
-        let renderer = Renderer::new(&wgpu.device, wgpu.config.format, RendererOptions::default());
-
-        Self {
-            context,
-            state,
-            renderer,
-        }
-    }
-
-    fn render(
-        &mut self,
-        wgpu: &WgpuWindow,
-        encoder: &mut CommandEncoder,
-        view: &TextureView,
-        ui: &mut dyn EguiMenu,
-    ) -> PlatformOutput {
-        // 获取输入并更新界面
-        let input = self.state.take_egui_input(&wgpu.window);
-        let full_output = self.context.run(input, |context| {
-            ui.render(context);
-        });
-
-        // 图元信息
-        let primitives = self
-            .context
-            .tessellate(full_output.shapes, full_output.pixels_per_point);
-        // 屏幕信息
-        let screen_info = ScreenDescriptor {
-            size_in_pixels: [wgpu.config.width, wgpu.config.height],
-            pixels_per_point: full_output.pixels_per_point,
-        };
-        // 更新纹理
-        for (id, image_delta) in &full_output.textures_delta.set {
-            self.renderer
-                .update_texture(&wgpu.device, &wgpu.queue, *id, image_delta);
-        }
-        // 更新缓冲区
-        self.renderer.update_buffers(
-            &wgpu.device,
-            &wgpu.queue,
-            encoder,
-            &primitives,
-            &screen_info,
-        );
-        // 绘制图元
-        {
-            let mut rpass = encoder
-                .begin_render_pass(&RenderPassDescriptor {
-                    label: Some("Render Egui"),
-                    color_attachments: &[Some(RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: Operations {
-                            load: LoadOp::Load,
-                            store: StoreOp::Store,
-                        },
-                    })],
-                    ..Default::default()
-                })
-                .forget_lifetime();
-            self.renderer.render(&mut rpass, &primitives, &screen_info);
-        }
-        // 释放纹理
-        for id in &full_output.textures_delta.free {
-            self.renderer.free_texture(id);
-        }
-        // 检查是否需要重绘
-        if self.context.has_requested_repaint() {
-            wgpu.window.request_redraw();
-        }
-
-        return full_output.platform_output;
-    }
-}
+use crate::window::{EguiMenu, EguiWindow, WindowMode};
 
 #[derive(Default)]
 struct IngameImeMenu {
@@ -198,47 +32,33 @@ impl EguiMenu for IngameImeMenu {
 }
 
 struct IngameImeApp<'a> {
-    wgpu: WgpuWindow<'a>,
-    egui: Egui,
+    window: EguiWindow<'a>,
     ime: Box<dyn InputContext>,
     menu: IngameImeMenu,
 }
 
 impl IngameImeApp<'_> {
     fn new(el: &ActiveEventLoop) -> Self {
-        info!("Create application window");
-        let attrs = Window::default_attributes()
-            .with_title("IngameIME Application")
-            .with_visible(false);
-        let window = Arc::new(el.create_window(attrs).unwrap());
+        info!("IngameImeApp starting");
 
-        info!("Create Wgpu for window");
-        let wgpu = pollster::block_on(WgpuWindow::new(window.clone().into()));
+        let window = EguiWindow::new(el);
 
-        info!("Create Egui");
-        let egui = Egui::new(&wgpu);
-
-        info!("Create InputContext");
-        let ime = match unsafe { window.window_handle_any_thread().unwrap().as_raw() } {
-            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd, false).unwrap(),
+        debug!("Create InputContext");
+        let ime = match window.handle {
+            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd, true).unwrap(),
             _ => {
                 panic!("Unsupported platform");
             }
         };
 
-        info!("Create Ui");
+        debug!("Create Ui");
         let menu = IngameImeMenu::default();
 
-        info!("Show window");
-        window.set_visible(true);
+        debug!("Show window");
+        window.inner.set_visible(true);
 
-        info!("App initialized");
-        Self {
-            wgpu,
-            egui,
-            ime,
-            menu,
-        }
+        info!("IngameImeApp started");
+        Self { window, ime, menu }
     }
 }
 
@@ -254,10 +74,8 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let app = self.app.as_mut().unwrap();
-        let wgpu = &mut app.wgpu;
-        let egui = &mut app.egui;
+        let window = &mut app.window;
         let menu = &mut app.menu;
-        let window = wgpu.window.as_ref();
 
         match event {
             WindowEvent::CloseRequested => {
@@ -265,54 +83,10 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
                 info!("Exiting application");
             }
             WindowEvent::Resized(size) => {
-                wgpu.resize(size.width, size.height);
+                window.resize(size.width, size.height);
             }
             WindowEvent::RedrawRequested => {
-                // 渲染 0 尺寸画面会导致崩溃
-                if wgpu.config.width == 0 || wgpu.config.height == 0 {
-                    return;
-                }
-
-                // 获取当前纹理视图
-                let output = wgpu.surface.get_current_texture().unwrap();
-                let view = output
-                    .texture
-                    .create_view(&TextureViewDescriptor::default());
-
-                // 初始化命令编码器
-                let mut encoder = wgpu
-                    .device
-                    .create_command_encoder(&CommandEncoderDescriptor {
-                        label: Some("Render Encoder"),
-                    });
-
-                // 场景绘制
-                {
-                    let rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-                        label: Some("Render Scene"),
-                        color_attachments: &[Some(RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: Operations {
-                                load: LoadOp::Clear(Color {
-                                    r: 0.1,
-                                    g: 0.2,
-                                    b: 0.3,
-                                    a: 1.0,
-                                }),
-                                store: StoreOp::Store,
-                            },
-                        })],
-                        ..Default::default()
-                    });
-                    drop(rpass);
-                }
-
-                // Egui 绘制
-                {
-                    let mut platform = egui.render(wgpu, &mut encoder, &view, menu);
-
+                if let Some(mut platform) = window.render(menu) {
                     if let Some(ime) = platform.ime {
                         app.ime.set_activated(true);
 
@@ -327,31 +101,39 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
                         app.ime.set_activated(false);
                     }
                     platform.ime = None;
-                    app.egui.state.handle_platform_output(window, platform);
+                    window.handler_platform(platform);
                 }
-
-                wgpu.queue.submit(Some(encoder.finish()));
-                output.present();
             }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
                         logical_key: Key::Named(NamedKey::F11),
-                        state: ElementState::Pressed,
+                        state: ElementState::Released,
                         ..
                     },
                 ..
-            } => {
-                if window.fullscreen().is_none() {
-                    window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-                } else {
-                    window.set_fullscreen(None);
+            } => match window.mode {
+                WindowMode::Window => window.set_window_mode(WindowMode::Exclusive),
+                WindowMode::Borderless | WindowMode::Exclusive => {
+                    window.set_window_mode(WindowMode::Window)
                 }
-            }
+            },
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Named(NamedKey::F12),
+                        state: ElementState::Released,
+                        ..
+                    },
+                ..
+            } => match window.mode {
+                WindowMode::Window => window.set_window_mode(WindowMode::Borderless),
+                WindowMode::Borderless | WindowMode::Exclusive => {
+                    window.set_window_mode(WindowMode::Window)
+                }
+            },
             event => {
-                if egui.state.on_window_event(&window, &event).repaint {
-                    window.request_redraw();
-                }
+                window.on_window_event(event);
             }
         }
     }
