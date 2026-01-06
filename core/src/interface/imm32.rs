@@ -8,7 +8,7 @@ use windows::Win32::UI::Input::Ime::{
     CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
     GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING,
     IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE,
-    IMN_SETCONVERSIONMODE, ImmAssociateContext, ImmCreateContext, ImmDestroyContext,
+    IMN_SETCONVERSIONMODE, ISC_SHOWUIALL, ImmAssociateContext, ImmCreateContext, ImmDestroyContext,
     ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME,
     ImmSetCandidateWindow, ImmSetCompositionWindow, ImmSetOpenStatus, NI_COMPOSITIONSTR,
 };
@@ -31,7 +31,7 @@ unsafe extern "system" fn ingame_ime_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
-    mut lparam: LPARAM,
+    lparam: LPARAM,
 ) -> LRESULT {
     unsafe {
         let handle = GetPropW(hwnd, w!("IngameIME_Userdata"));
@@ -57,8 +57,7 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 WM_IME_SETCONTEXT => {
                     debug!("WM_SETCONTEXT");
-                    lparam = LPARAM(0);
-                    return LRESULT(1);
+                    return DefWindowProcW(hwnd, msg, wparam, LPARAM(ISC_SHOWUIALL as isize));
                 }
                 WM_IME_STARTCOMPOSITION => {
                     debug!("WM_IME_STARTCOMPOSITION");
@@ -119,7 +118,7 @@ unsafe extern "system" fn ingame_ime_proc(
                         if let Some(cb) = &context.input_mode_cb {
                             cb(context.get_input_mode());
                         }
-                        return DefWindowProcW(hwnd, msg, wparam, lparam);
+                        return LRESULT(1);
                     }
                     _ => {
                         return DefWindowProcW(hwnd, msg, wparam, lparam);
