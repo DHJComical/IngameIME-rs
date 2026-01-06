@@ -8,9 +8,10 @@ use windows::Win32::UI::Input::Ime::{
     CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
     GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING,
     IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE,
-    IMN_SETCONVERSIONMODE, ISC_SHOWUIALL, ImmAssociateContext, ImmCreateContext, ImmDestroyContext,
-    ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME,
-    ImmSetCandidateWindow, ImmSetCompositionWindow, ImmSetOpenStatus, NI_COMPOSITIONSTR,
+    IMN_SETCONVERSIONMODE, ISC_SHOWUICANDIDATEWINDOW, ISC_SHOWUICOMPOSITIONWINDOW,
+    ImmAssociateContext, ImmCreateContext, ImmDestroyContext, ImmGetCandidateListW,
+    ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME, ImmSetCandidateWindow,
+    ImmSetCompositionWindow, ImmSetOpenStatus, NI_COMPOSITIONSTR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, GWLP_WNDPROC, GetPropW, SetPropW, SetWindowLongPtrW,
@@ -57,7 +58,12 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 WM_IME_SETCONTEXT => {
                     debug!("WM_SETCONTEXT");
-                    return DefWindowProcW(hwnd, msg, wparam, LPARAM(ISC_SHOWUIALL as isize));
+                    let mut lparam = lparam.0;
+                    lparam &= !ISC_SHOWUICOMPOSITIONWINDOW as isize;
+                    if context.ui_less {
+                        lparam &= !ISC_SHOWUICANDIDATEWINDOW as isize;
+                    }
+                    return DefWindowProcW(hwnd, msg, wparam, LPARAM(lparam));
                 }
                 WM_IME_STARTCOMPOSITION => {
                     debug!("WM_IME_STARTCOMPOSITION");
@@ -95,20 +101,26 @@ unsafe extern "system" fn ingame_ime_proc(
                 WM_IME_NOTIFY => match wparam.0 as u32 {
                     IMN_OPENCANDIDATE => {
                         debug!("IMN_OPENCANDIDATE");
-                        if let Some(cb) = &context.candidate_cb {
-                            cb(CandidateEvent::Begin);
+                        if context.ui_less {
+                            if let Some(cb) = &context.candidate_cb {
+                                cb(CandidateEvent::Begin);
+                            }
                         }
                         return LRESULT(1);
                     }
                     IMN_CHANGECANDIDATE => {
                         debug!("IMN_CHANGECANDIDATE");
-                        context.run_candidate_update();
+                        if context.ui_less {
+                            context.run_candidate_update();
+                        }
                         return LRESULT(1);
                     }
                     IMN_CLOSECANDIDATE => {
                         debug!("IMN_CLOSECANDIDATE");
-                        if let Some(cb) = &context.candidate_cb {
-                            cb(CandidateEvent::End);
+                        if context.ui_less {
+                            if let Some(cb) = &context.candidate_cb {
+                                cb(CandidateEvent::End);
+                            }
                         }
                         return LRESULT(1);
                     }
@@ -146,6 +158,7 @@ pub struct Imm32InputContext {
     prev: HIMC,
     himc: HIMC,
     activated: bool,
+    ui_less: bool,
     rect: RECT,
     proc: WNDPROC,
     commit_cb: Option<CommitCallback>,
@@ -156,7 +169,8 @@ pub struct Imm32InputContext {
 }
 
 impl Imm32InputContext {
-    pub fn new(hwnd: NonZeroIsize) -> Option<Box<dyn InputContext>> {
+    /// ui_less: whether to show candidate window or not(true: hide, false:show)
+    pub fn new(hwnd: NonZeroIsize, ui_less: bool) -> Option<Box<dyn InputContext>> {
         info!("Creating Imm32InputContext");
         unsafe {
             let hwnd: HWND = std::mem::transmute(hwnd);
@@ -179,6 +193,7 @@ impl Imm32InputContext {
                     prev,
                     himc,
                     activated: false,
+                    ui_less,
                     rect: RECT::default(),
                     proc,
                     commit_cb: None,

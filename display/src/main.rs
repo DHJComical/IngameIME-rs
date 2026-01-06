@@ -220,7 +220,7 @@ impl IngameImeApp<'_> {
 
         info!("Create InputContext");
         let ime = match unsafe { window.window_handle_any_thread().unwrap().as_raw() } {
-            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd).unwrap(),
+            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd, false).unwrap(),
             _ => {
                 panic!("Unsupported platform");
             }
