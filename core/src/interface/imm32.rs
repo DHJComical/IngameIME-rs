@@ -3,13 +3,14 @@ use std::num::NonZeroIsize;
 use std::slice::from_raw_parts;
 
 use log::{debug, error, info, warn};
-use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::UI::Input::Ime::{
-    CANDIDATELIST, CPS_CANCEL, GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE,
-    IME_COMPOSITION_STRING, IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE,
-    IMN_OPENCANDIDATE, IMN_SETCONVERSIONMODE, ImmAssociateContext, ImmCreateContext,
-    ImmDestroyContext, ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus,
-    ImmNotifyIME, ImmSetOpenStatus, NI_COMPOSITIONSTR,
+    CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
+    GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING,
+    IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE,
+    IMN_SETCONVERSIONMODE, ImmAssociateContext, ImmCreateContext, ImmDestroyContext,
+    ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME,
+    ImmSetCandidateWindow, ImmSetCompositionWindow, ImmSetOpenStatus, NI_COMPOSITIONSTR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, GWLP_WNDPROC, GetPropW, SetPropW, SetWindowLongPtrW,
@@ -146,6 +147,7 @@ pub struct Imm32InputContext {
     prev: HIMC,
     himc: HIMC,
     activated: bool,
+    rect: RECT,
     proc: WNDPROC,
     commit_cb: Option<CommitCallback>,
     preedit_cb: Option<PreEditCallback>,
@@ -178,6 +180,7 @@ impl Imm32InputContext {
                     prev,
                     himc,
                     activated: false,
+                    rect: RECT::default(),
                     proc,
                     commit_cb: None,
                     preedit_cb: None,
@@ -367,8 +370,35 @@ impl InputContext for Imm32InputContext {
         }
     }
 
-    fn set_preedit_rect(&mut self, _x: i32, _y: i32, _width: i32, _height: i32) {
-        // not support
+    fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
+        let rect = RECT {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+        };
+        if self.rect != rect {
+            self.rect = rect;
+            debug!("Set CandidateWindow Pos");
+            // candidate window
+            unsafe {
+                let mut candidate = CANDIDATEFORM::default();
+                candidate.dwStyle = CFS_EXCLUDE;
+                candidate.ptCurrentPos.x = x;
+                candidate.ptCurrentPos.y = y;
+                candidate.rcArea = rect;
+                let _ = ImmSetCandidateWindow(self.himc, &candidate);
+            }
+            debug!("Set PreEditWindow Pos");
+            unsafe {
+                let mut composition = COMPOSITIONFORM::default();
+                composition.dwStyle = CFS_RECT;
+                composition.ptCurrentPos.x = x;
+                composition.ptCurrentPos.y = y;
+                composition.rcArea = rect;
+                let _ = ImmSetCompositionWindow(self.himc, &composition);
+            }
+        }
     }
 
     fn set_commit_callback(&mut self, callback: CommitCallback) {
