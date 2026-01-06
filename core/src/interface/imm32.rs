@@ -58,7 +58,7 @@ unsafe extern "system" fn ingame_ime_proc(
                 WM_IME_SETCONTEXT => {
                     debug!("WM_SETCONTEXT");
                     lparam = LPARAM(0);
-                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                    return LRESULT(1);
                 }
                 WM_IME_STARTCOMPOSITION => {
                     debug!("WM_IME_STARTCOMPOSITION");
