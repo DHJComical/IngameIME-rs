@@ -1,8 +1,8 @@
 [package]
-name = "ingameime-demo"
+name = "ingameime-display"
 version = "0.1.0"
 edition = "2024"
-description = "A demo application for testing JNI wrapper."
+description = "IngameIME display interface"
 
 [dependencies]
 # IngameIme

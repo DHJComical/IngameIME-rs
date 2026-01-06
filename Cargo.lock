@@ -1062,7 +1062,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ingameime-demo"
+name = "ingameime-display"
 version = "0.1.0"
 dependencies = [
  "egui",
@@ -1127,14 +1127,6 @@ name = "jni-sys"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
-
-[[package]]
-name = "jni-wrapper"
-version = "0.1.0"
-dependencies = [
- "ingameime-core",
- "jni",
-]
 
 [[package]]
 name = "jobserver"

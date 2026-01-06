@@ -154,10 +154,10 @@ pub struct Imm32InputContext {
 
 impl Imm32InputContext {
     pub fn new(hwnd: NonZeroIsize) -> Option<Box<dyn InputContext>> {
-        info!("Creating Imm32InputContext...");
+        info!("Creating Imm32InputContext");
         unsafe {
             let hwnd: HWND = std::mem::transmute(hwnd);
-            debug!("Create HIMC.");
+            debug!("Create HIMC");
             let himc = ImmCreateContext();
             if !himc.is_invalid() {
                 debug!("Associate NULL HIMC to disable IME");
@@ -188,16 +188,16 @@ impl Imm32InputContext {
                 let ptr = &*context as *const Imm32InputContext as _;
                 match SetPropW(hwnd, w!("IngameIME_Userdata"), Some(HANDLE(ptr))) {
                     Ok(_) => {
-                        info!("Imm32InputContext has created.");
+                        info!("Imm32InputContext has created");
                         Some(context)
                     }
                     Err(e) => {
-                        error!("Unable to SetPropW for IngameIME_Userdata: {e} at new.");
+                        error!("Unable to SetPropW for IngameIME_Userdata: {e}");
                         None
                     }
                 }
             } else {
-                error!("Unable to create HIMC at new.");
+                error!("Unable to create HIMC");
                 None
             }
         }
@@ -413,7 +413,7 @@ impl InputContext for Imm32InputContext {
 impl Drop for Imm32InputContext {
     fn drop(&mut self) {
         unsafe {
-            info!("Dropping Imm32InputContext...");
+            info!("Dropping Imm32InputContext");
             // disable ime
             self.set_activated(false);
             // restore previous wndproc
@@ -421,7 +421,7 @@ impl Drop for Imm32InputContext {
             // clear pointer which will be invalid
             let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Some(HANDLE::default()))
                 .inspect_err(|e| {
-                    error!("Unable to SetPropW for IngameIME_Userdata: {e} at drop");
+                    error!("Unable to SetPropW for IngameIME_Userdata: {e}");
                 });
             // restore previous himc
             ImmAssociateContext(self.hwnd, self.prev);
@@ -429,7 +429,7 @@ impl Drop for Imm32InputContext {
             if (!ImmDestroyContext(self.himc)).into() {
                 error!("Unable to destroy HIMC");
             }
-            info!("Imm32InputContext dropped.");
+            info!("Imm32InputContext dropped");
         }
     }
 }

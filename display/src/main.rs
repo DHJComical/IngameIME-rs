@@ -5,10 +5,10 @@ use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
 use log::{debug, info};
 use std::{error::Error, sync::Arc};
 use wgpu::{
-    Backends, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
+    Backends, Color, CommandEncoder, CommandEncoderDescriptor, Device, DeviceDescriptor, Instance,
     InstanceDescriptor, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
-    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureViewDescriptor,
-    rwh::RawWindowHandle,
+    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, TextureView,
+    TextureViewDescriptor, rwh::RawWindowHandle,
 };
 use winit::{
     application::ApplicationHandler,
@@ -19,7 +19,7 @@ use winit::{
     window::{Fullscreen, Window, WindowId},
 };
 
-struct Wgpu<'a> {
+struct WgpuWindow<'a> {
     window: Arc<Window>,
     surface: Surface<'a>,
     device: Device,
@@ -27,9 +27,9 @@ struct Wgpu<'a> {
     config: SurfaceConfiguration,
 }
 
-impl<'a> Wgpu<'a> {
+impl<'a> WgpuWindow<'a> {
     async fn new(window: Arc<Window>) -> Self {
-        info!("Initializing WGPU instance");
+        info!("Initializing Wgpu instance");
         let instance = Instance::new(&InstanceDescriptor {
             backends: Backends::all(),
             ..Default::default()
@@ -90,11 +90,11 @@ struct Egui {
 }
 
 impl Egui {
-    fn new(wgpu: &Wgpu) -> Self {
-        info!("Creating egui context");
+    fn new(wgpu: &WgpuWindow) -> Self {
+        info!("Creating Egui context");
         let context = Context::default();
 
-        info!("Creating egui state");
+        info!("Creating Egui state");
         let state = State::new(
             context.clone(),
             ViewportId::default(),
@@ -104,7 +104,7 @@ impl Egui {
             None,
         );
 
-        info!("Creating egui renderer");
+        info!("Creating Egui renderer");
         let renderer = Renderer::new(&wgpu.device, wgpu.config.format, RendererOptions::default());
 
         Self {
@@ -116,9 +116,9 @@ impl Egui {
 
     fn render(
         &mut self,
-        wgpu: &Wgpu,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
+        wgpu: &WgpuWindow,
+        encoder: &mut CommandEncoder,
+        view: &TextureView,
         ui: &mut dyn EguiMenu,
     ) {
         // 获取输入并更新界面
@@ -193,14 +193,14 @@ impl EguiMenu for IngameImeMenu {
         context.set_visuals(Visuals::light());
 
         egui::Window::new("IngameIME").show(&context, |ui| {
-            ui.label("Text input with IME support.");
+            ui.label("Text input with IME support");
             if ui.text_edit_multiline(&mut self.text).has_focus() {}
         });
     }
 }
 
 struct WinitApp<'a> {
-    wgpu: Wgpu<'a>,
+    wgpu: WgpuWindow<'a>,
     egui: Egui,
     input: Box<dyn InputContext>,
     menu: IngameImeMenu,
@@ -215,7 +215,7 @@ impl WinitApp<'_> {
         let window = Arc::new(el.create_window(attrs).unwrap());
 
         info!("Create Wgpu for window");
-        let wgpu = pollster::block_on(Wgpu::new(window.clone().into()));
+        let wgpu = pollster::block_on(WgpuWindow::new(window.clone().into()));
 
         info!("Create Egui");
         let egui = Egui::new(&wgpu);
