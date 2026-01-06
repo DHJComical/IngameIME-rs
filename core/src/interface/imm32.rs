@@ -390,7 +390,9 @@ impl InputContext for Imm32InputContext {
                 candidate.ptCurrentPos.x = x;
                 candidate.ptCurrentPos.y = y;
                 candidate.rcArea = rect;
-                let _ = ImmSetCandidateWindow(self.himc, &candidate);
+                if (!ImmSetCandidateWindow(self.himc, &candidate)).into() {
+                    error!("Unable to SetCandidateWindow");
+                }
             }
             debug!("Set PreEditWindow Pos");
             unsafe {
@@ -399,7 +401,9 @@ impl InputContext for Imm32InputContext {
                 composition.ptCurrentPos.x = x;
                 composition.ptCurrentPos.y = y;
                 composition.rcArea = rect;
-                let _ = ImmSetCompositionWindow(self.himc, &composition);
+                if (!ImmSetCompositionWindow(self.himc, &composition)).into() {
+                    error!("Unable to SetPreEditWindow");
+                }
             }
         }
     }
