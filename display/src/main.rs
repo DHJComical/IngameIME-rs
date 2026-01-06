@@ -208,7 +208,7 @@ impl IngameImeApp<'_> {
     fn new(el: &ActiveEventLoop) -> Self {
         info!("Create application window");
         let attrs = Window::default_attributes()
-            .with_title("LearnWgpu")
+            .with_title("IngameIME Application")
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).unwrap());
 
