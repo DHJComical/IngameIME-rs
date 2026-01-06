@@ -46,14 +46,14 @@ pub struct InputSource {
 }
 
 pub enum InputSourceInfo {
-    /// The input source retrieve is not supported.
+    /// The input source info is not supported.
     Unsupported,
     Supported(InputSource),
 }
 pub type InputSourceCallback = Box<dyn Fn(InputSourceInfo)>;
 
 pub enum InputMode {
-    /// Input mode retrieve is not supported.
+    /// Input mode info is not supported.
     Unsupported,
     /// Input mode for typing in English.
     Alpha,
@@ -64,7 +64,7 @@ pub type InputModeCallback = Box<dyn Fn(InputMode)>;
 
 pub trait InputContext {
     /// Retrieves active input method
-    fn get_input_method(&self) -> InputSourceInfo;
+    fn get_input_source(&self) -> InputSourceInfo;
 
     /// Retrieves the current input mode.
     fn get_input_mode(&self) -> InputMode;

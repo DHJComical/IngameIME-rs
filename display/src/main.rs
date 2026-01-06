@@ -1,4 +1,4 @@
-use egui::{Context, ViewportId, Visuals};
+use egui::{Context, PlatformOutput, ViewportId, Visuals};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use egui_winit::State;
 use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
@@ -29,33 +29,33 @@ struct WgpuWindow<'a> {
 
 impl<'a> WgpuWindow<'a> {
     async fn new(window: Arc<Window>) -> Self {
-        info!("Initializing Wgpu instance");
+        info!("Init Wgpu instance");
         let instance = Instance::new(&InstanceDescriptor {
             backends: Backends::all(),
             ..Default::default()
         });
 
-        info!("Creating surface");
+        info!("Create surface");
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        info!("Requesting adapter");
+        info!("Request adapter");
         let adapter = instance
             .request_adapter(&RequestAdapterOptions::default())
             .await
             .unwrap();
         info!("{:?}", adapter.get_info());
 
-        info!("Requesting device and queue");
+        info!("Request device and queue");
         let (device, queue) = adapter
             .request_device(&DeviceDescriptor::default())
             .await
             .unwrap();
 
-        info!("Acquiring default surface configuration");
+        info!("Acquire default surface configuration");
         let config = surface.get_default_config(&adapter, 0, 0).unwrap();
         debug!("{:?}", config);
 
-        info!("WGPU initialization complete");
+        info!("Wgpu initialized");
 
         Self {
             window,
@@ -91,10 +91,10 @@ struct Egui {
 
 impl Egui {
     fn new(wgpu: &WgpuWindow) -> Self {
-        info!("Creating Egui context");
+        info!("Create Egui context");
         let context = Context::default();
 
-        info!("Creating Egui state");
+        info!("Create Egui state");
         let state = State::new(
             context.clone(),
             ViewportId::default(),
@@ -104,7 +104,7 @@ impl Egui {
             None,
         );
 
-        info!("Creating Egui renderer");
+        info!("Create Egui renderer");
         let renderer = Renderer::new(&wgpu.device, wgpu.config.format, RendererOptions::default());
 
         Self {
@@ -120,16 +120,12 @@ impl Egui {
         encoder: &mut CommandEncoder,
         view: &TextureView,
         ui: &mut dyn EguiMenu,
-    ) {
+    ) -> PlatformOutput {
         // 获取输入并更新界面
         let input = self.state.take_egui_input(&wgpu.window);
         let full_output = self.context.run(input, |context| {
             ui.render(context);
         });
-
-        // 处理平台输出
-        self.state
-            .handle_platform_output(&wgpu.window, full_output.platform_output);
 
         // 图元信息
         let primitives = self
@@ -180,6 +176,8 @@ impl Egui {
         if self.context.has_requested_repaint() {
             wgpu.window.request_redraw();
         }
+
+        return full_output.platform_output;
     }
 }
 
@@ -199,14 +197,14 @@ impl EguiMenu for IngameImeMenu {
     }
 }
 
-struct WinitApp<'a> {
+struct IngameImeApp<'a> {
     wgpu: WgpuWindow<'a>,
     egui: Egui,
-    input: Box<dyn InputContext>,
+    ime: Box<dyn InputContext>,
     menu: IngameImeMenu,
 }
 
-impl WinitApp<'_> {
+impl IngameImeApp<'_> {
     fn new(el: &ActiveEventLoop) -> Self {
         info!("Create application window");
         let attrs = Window::default_attributes()
@@ -221,7 +219,7 @@ impl WinitApp<'_> {
         let egui = Egui::new(&wgpu);
 
         info!("Create InputContext");
-        let input = match unsafe { window.window_handle_any_thread().unwrap().as_raw() } {
+        let ime = match unsafe { window.window_handle_any_thread().unwrap().as_raw() } {
             RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd).unwrap(),
             _ => {
                 panic!("Unsupported platform");
@@ -231,27 +229,27 @@ impl WinitApp<'_> {
         info!("Create Ui");
         let menu = IngameImeMenu::default();
 
-        info!("Show application window");
+        info!("Show window");
         window.set_visible(true);
 
-        info!("WinitApp initialized");
+        info!("App initialized");
         Self {
             wgpu,
             egui,
-            input,
+            ime,
             menu,
         }
     }
 }
 
 #[derive(Default)]
-struct WinitAppHandler<'a> {
-    app: Option<WinitApp<'a>>,
+struct AppHandler<'a> {
+    app: Option<IngameImeApp<'a>>,
 }
 
-impl<'a> ApplicationHandler for WinitAppHandler<'a> {
+impl<'a> ApplicationHandler for AppHandler<'a> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        self.app = Some(WinitApp::new(el));
+        self.app = Some(IngameImeApp::new(el));
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
@@ -313,7 +311,23 @@ impl<'a> ApplicationHandler for WinitAppHandler<'a> {
 
                 // Egui 绘制
                 {
-                    egui.render(wgpu, &mut encoder, &view, menu);
+                    let mut platform = egui.render(wgpu, &mut encoder, &view, menu);
+
+                    if let Some(ime) = platform.ime {
+                        app.ime.set_activated(true);
+
+                        let rect = ime.cursor_rect;
+                        app.ime.set_preedit_rect(
+                            rect.left() as i32,
+                            rect.top() as i32,
+                            rect.width() as i32,
+                            rect.height() as i32,
+                        );
+                    } else {
+                        app.ime.set_activated(false);
+                    }
+                    platform.ime = None;
+                    app.egui.state.handle_platform_output(window, platform);
                 }
 
                 wgpu.queue.submit(Some(encoder.finish()));
@@ -348,6 +362,6 @@ fn main() -> Result<(), impl Error> {
     info!("Starting application");
 
     let el = EventLoop::new().unwrap();
-    let mut app = WinitAppHandler::default();
+    let mut app = AppHandler::default();
     el.run_app(&mut app)
 }

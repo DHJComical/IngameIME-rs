@@ -3,20 +3,18 @@ use std::num::NonZeroIsize;
 use std::slice::from_raw_parts;
 
 use log::{debug, error, info, warn};
-use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::Ime::{
-    CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
-    GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING,
-    IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE,
-    IMN_SETCONVERSIONMODE, ISC_SHOWUICANDIDATEWINDOW, ISC_SHOWUICOMPOSITIONWINDOW,
-    ImmAssociateContext, ImmCreateContext, ImmDestroyContext, ImmGetCandidateListW,
-    ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME, ImmSetCandidateWindow,
-    ImmSetCompositionWindow, NI_COMPOSITIONSTR,
+    CANDIDATELIST, CPS_CANCEL, GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE,
+    IME_COMPOSITION_STRING, IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE,
+    IMN_OPENCANDIDATE, IMN_SETCONVERSIONMODE, ImmAssociateContext, ImmCreateContext,
+    ImmDestroyContext, ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus,
+    ImmNotifyIME, ImmSetOpenStatus, NI_COMPOSITIONSTR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, GWLP_WNDPROC, GetPropW, SetPropW, SetWindowLongPtrW,
     WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_NOTIFY, WM_IME_SETCONTEXT,
-    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WNDPROC,
+    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_INPUTLANGCHANGEREQUEST, WNDPROC,
 };
 use windows::core::w;
 
@@ -27,6 +25,7 @@ use crate::interface::lib::{
 };
 
 #[allow(dead_code)]
+#[allow(unused_assignments)]
 unsafe extern "system" fn ingame_ime_proc(
     hwnd: HWND,
     msg: u32,
@@ -39,11 +38,15 @@ unsafe extern "system" fn ingame_ime_proc(
             let context = &*(handle.0 as *const Imm32InputContext);
 
             match msg {
+                WM_INPUTLANGCHANGEREQUEST => {
+                    debug!("WM_INPUTLANGCHANGEREQUEST");
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
                 WM_INPUTLANGCHANGE => {
                     debug!("WM_INPUTLANGCHANGE");
-                    // notify input method change
+                    // notify input source change
                     if let Some(cb) = &context.input_source_cb {
-                        cb(context.get_input_method());
+                        cb(context.get_input_source());
                     }
                     // notify input mode change
                     if let Some(cb) = &context.input_mode_cb {
@@ -53,8 +56,7 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 WM_IME_SETCONTEXT => {
                     debug!("WM_SETCONTEXT");
-                    // hide preedit window and candidate window
-                    lparam.0 &= !(ISC_SHOWUICOMPOSITIONWINDOW | ISC_SHOWUICANDIDATEWINDOW) as isize;
+                    lparam = LPARAM(0);
                     return DefWindowProcW(hwnd, msg, wparam, lparam);
                 }
                 WM_IME_STARTCOMPOSITION => {
@@ -188,7 +190,12 @@ impl Imm32InputContext {
                 let ptr = &*context as *const Imm32InputContext as _;
                 match SetPropW(hwnd, w!("IngameIME_Userdata"), Some(HANDLE(ptr))) {
                     Ok(_) => {
-                        info!("Imm32InputContext has created");
+                        debug!("Config OpenStatus");
+                        if (!ImmSetOpenStatus(himc, true)).into() {
+                            error!("Unable to SetOpenStatus");
+                            return None;
+                        }
+                        info!("Imm32InputContext created");
                         Some(context)
                     }
                     Err(e) => {
@@ -272,15 +279,18 @@ impl Imm32InputContext {
                 // candidate strings
                 let mut candidates = Vec::<String>::with_capacity(items);
 
+                // offset array
+                let offsets = buffer.as_ptr().offset(6 * 4) as *const u32;
+
                 // foreach string
                 for i in 0..items {
                     // index of the string offset
-                    let i_offset = candidate.dwPageStart as usize + i;
+                    let i_offset = (candidate.dwPageStart as usize + i) as isize;
                     // string offset
-                    let offset = candidate.dwOffset[i_offset];
+                    let offset = *offsets.offset(i_offset);
                     // string length in bytes
                     let len = if i + 1 < items {
-                        candidate.dwOffset[i_offset + 1] - offset
+                        *offsets.offset(i_offset + 1) - offset
                     } else {
                         size - offset
                     };
@@ -309,7 +319,7 @@ impl Imm32InputContext {
 }
 
 impl InputContext for Imm32InputContext {
-    fn get_input_method(&self) -> InputSourceInfo {
+    fn get_input_source(&self) -> InputSourceInfo {
         InputSourceInfo::Unsupported
     }
 
@@ -357,36 +367,8 @@ impl InputContext for Imm32InputContext {
         }
     }
 
-    fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
-        debug!("Set CandidateWindow Pos");
-        // candidate window
-        unsafe {
-            let mut candidate = CANDIDATEFORM::default();
-            candidate.dwStyle = CFS_EXCLUDE;
-            candidate.ptCurrentPos.x = x;
-            candidate.ptCurrentPos.y = y;
-            candidate.rcArea = RECT {
-                left: x,
-                top: y,
-                right: x + width,
-                bottom: y + height,
-            };
-            let _ = ImmSetCandidateWindow(self.himc, &candidate);
-        }
-        debug!("Set PreEditWindow Pos");
-        unsafe {
-            let mut composition = COMPOSITIONFORM::default();
-            composition.dwStyle = CFS_RECT;
-            composition.ptCurrentPos.x = x;
-            composition.ptCurrentPos.y = y;
-            composition.rcArea = RECT {
-                left: x,
-                top: y,
-                right: x + width,
-                bottom: y + height,
-            };
-            let _ = ImmSetCompositionWindow(self.himc, &composition);
-        }
+    fn set_preedit_rect(&mut self, _x: i32, _y: i32, _width: i32, _height: i32) {
+        // not support
     }
 
     fn set_commit_callback(&mut self, callback: CommitCallback) {
