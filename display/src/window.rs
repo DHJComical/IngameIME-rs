@@ -16,6 +16,7 @@ use wgpu::{
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
+use winit::monitor::VideoModeHandle;
 use winit::window::{Fullscreen, Window};
 
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
@@ -252,6 +253,17 @@ impl<'a> EguiWindow<'a> {
         self.state.handle_platform_output(&self.inner, platform);
     }
 
+    pub fn get_current_video_mode(&self) -> Option<VideoModeHandle> {
+        if let Some(display) = self.inner.current_monitor() {
+            if let Some(refresh_rate) = display.refresh_rate_millihertz() {
+                return display.video_modes().find(|it| {
+                    it.refresh_rate_millihertz() == refresh_rate && it.size() == display.size()
+                });
+            }
+        }
+        None
+    }
+
     fn set_window_mode_broderless(&self) {
         self.inner
             .set_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -260,21 +272,15 @@ impl<'a> EguiWindow<'a> {
 
     fn set_window_mode_exclusive(&self) {
         if let Some(display) = self.inner.current_monitor() {
-            // prefer currently used refresh rate, to prevent black screen
-            if let Some(refresh_rate) = display.refresh_rate_millihertz() {
-                if let Some(mode) = display
-                    .video_modes()
-                    .find(|it| it.refresh_rate_millihertz() == refresh_rate)
-                    .take()
-                {
-                    debug!("Set to Exclusive Mode: {mode}, Refresh Rate: {refresh_rate:?}");
-                    self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
-                    return;
-                }
+            // prefer currently used video mode, to prevent black screen
+            if let Some(mode) = self.get_current_video_mode() {
+                debug!("Set to Exclusive Mode: {mode}(Active)");
+                self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
+                return;
             }
             // fallback to the first video mode
             if let Some(mode) = display.video_modes().next().take() {
-                debug!("Set to Exclusive Mode: {mode}");
+                debug!("Set to Exclusive Mode: {mode}(FirstChoice)");
                 self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
                 return;
             }
