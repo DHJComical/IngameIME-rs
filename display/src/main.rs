@@ -1,7 +1,9 @@
+mod display;
+mod utils;
 mod window;
+
 use std::error::Error;
 
-use egui::{Context, Visuals};
 use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
 use log::{debug, info};
 use wgpu::rwh::RawWindowHandle;
@@ -13,23 +15,10 @@ use winit::{
     window::WindowId,
 };
 
-use crate::window::{EguiMenu, EguiWindow, WindowMode};
-
-#[derive(Default)]
-struct IngameImeMenu {
-    text: String,
-}
-
-impl EguiMenu for IngameImeMenu {
-    fn render(&mut self, context: &Context) {
-        context.set_visuals(Visuals::light());
-
-        egui::Window::new("IngameIME").show(&context, |ui| {
-            ui.label("Text input with IME support");
-            if ui.text_edit_multiline(&mut self.text).has_focus() {}
-        });
-    }
-}
+use crate::{
+    display::IngameImeMenu,
+    window::{EguiWindow, WindowMode},
+};
 
 struct IngameImeApp<'a> {
     window: EguiWindow<'a>,
