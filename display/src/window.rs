@@ -1,7 +1,10 @@
 use egui::{Context, PlatformOutput, ViewportId};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use egui_winit::State;
+use font_kit::font::Font;
+use font_kit::source::SystemSource;
 use log::{debug, error, info};
+use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::rwh::{HasWindowHandle, RawWindowHandle};
 use wgpu::{
@@ -45,6 +48,7 @@ pub struct EguiWindow<'a> {
     pub state: State,
     pub renderer: Renderer,
     pub mode: WindowMode,
+    pub fonts: HashMap<String, Font>,
 }
 
 impl<'a> EguiWindow<'a> {
@@ -55,6 +59,13 @@ impl<'a> EguiWindow<'a> {
             .with_title("IngameIME Application")
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).unwrap());
+
+        debug!("Get RawWindowHandle");
+        let handle = window
+            .window_handle()
+            .inspect_err(|e| error!("Unable to get RawWindowHandle: {e}"))
+            .expect("Unable to get RawWindowHandle")
+            .as_raw();
 
         debug!("Init Wgpu instance");
         let instance = Instance::new(&InstanceDescriptor {
@@ -95,12 +106,23 @@ impl<'a> EguiWindow<'a> {
         debug!("Create Egui renderer");
         let renderer = Renderer::new(&device, config.format, RendererOptions::default());
 
-        debug!("Get RawWindowHandle");
-        let handle = window
-            .window_handle()
-            .inspect_err(|e| error!("Unable to get RawWindowHandle: {e}"))
-            .expect("Unable to get RawWindowHandle")
-            .as_raw();
+        debug!("Load System fonts");
+        let fonts = SystemSource::new()
+            .all_fonts()
+            .inspect_err(|e| error!("Unable to load System fonts: {e}"))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|it| it.load().ok())
+            .filter_map(|font| font.postscript_name().map(|name| (name, font)))
+            .fold(HashMap::new(), |mut acc, (name, handle)| {
+                acc.entry(name).or_insert(handle);
+                acc
+            });
+
+        debug!("System fonts:");
+        for name in fonts.keys() {
+            debug!("{name}");
+        }
 
         info!("EguiWindow created");
 
@@ -115,6 +137,7 @@ impl<'a> EguiWindow<'a> {
             state,
             renderer,
             mode: WindowMode::Window,
+            fonts,
         }
     }
 
