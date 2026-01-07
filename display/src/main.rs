@@ -107,6 +107,15 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
+                        logical_key: Key::Named(NamedKey::Escape),
+                        state: ElementState::Released,
+                        ..
+                    },
+                ..
+            } => window.set_window_mode(WindowMode::Window),
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
                         logical_key: Key::Named(NamedKey::F11),
                         state: ElementState::Released,
                         ..

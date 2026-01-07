@@ -260,13 +260,27 @@ impl<'a> EguiWindow<'a> {
 
     fn set_window_mode_exclusive(&self) {
         if let Some(display) = self.inner.current_monitor() {
-            if let Some(mode) = display.video_modes().next().take() {
-                self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
+            // prefer currently used refresh rate, to prevent black screen
+            if let Some(refresh_rate) = display.refresh_rate_millihertz() {
+                if let Some(mode) = display
+                    .video_modes()
+                    .find(|it| it.refresh_rate_millihertz() == refresh_rate)
+                    .take()
+                {
+                    debug!("Set to Exclusive Mode: {mode}, Refresh Rate: {refresh_rate:?}");
+                    self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
+                    return;
+                }
             }
-            debug!("Set to Exclusive Mode");
-            return;
+            // fallback to the first video mode
+            if let Some(mode) = display.video_modes().next().take() {
+                debug!("Set to Exclusive Mode: {mode}");
+                self.inner.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
+                return;
+            }
         }
         error!("Unable to set to Exclusive Mode, fallback to Broderless Mode");
+        self.set_window_mode_broderless();
     }
 
     pub fn on_window_event(&mut self, event: WindowEvent) {
