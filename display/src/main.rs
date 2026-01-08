@@ -4,9 +4,8 @@ mod display;
 mod utils;
 mod window;
 
-use std::{collections::BTreeMap, error::Error};
+use std::error::Error;
 
-use font_kit::font::Font;
 use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
 use log::{debug, info};
 use wgpu::rwh::RawWindowHandle;
@@ -20,7 +19,6 @@ use winit::{
 
 use crate::{
     display::IngameImeMenu,
-    utils::get_system_fonts,
     window::{EguiWindow, WindowMode},
 };
 
@@ -28,7 +26,6 @@ struct IngameImeApp<'a> {
     window: EguiWindow<'a>,
     ime: Box<dyn InputContext>,
     menu: IngameImeMenu,
-    fonts: BTreeMap<String, Font>,
 }
 
 impl IngameImeApp<'_> {
@@ -46,10 +43,7 @@ impl IngameImeApp<'_> {
         };
 
         debug!("Create Ui");
-        let menu = IngameImeMenu::default();
-
-        debug!("Load System Fonts");
-        let fonts = get_system_fonts();
+        let menu = IngameImeMenu::new(&window.context);
 
         debug!("Show window");
         window.inner.set_visible(true);
@@ -59,7 +53,6 @@ impl IngameImeApp<'_> {
             window,
             ime,
             menu,
-            fonts,
         }
     }
 }
