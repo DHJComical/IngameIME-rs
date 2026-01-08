@@ -68,18 +68,13 @@ impl FontCache {
         self.prev_fonts.contains(name)
     }
 
-    pub fn add_font(&mut self, name: &String, font: &Font) -> Option<Arc<FontData>> {
+    pub fn add_font(&mut self, name: &String, font: &Font) {
         if !self.cache.contains_key(name) {
-            if !self.has_loaded {
-                let font_data = FontData::from_owned(font.copy_font_data().unwrap().to_vec());
-                self.cache.insert(name.clone(), Arc::new(font_data));
-                self.has_loaded = true;
-            } else {
-                return None;
-            }
+            let font_data = FontData::from_owned(font.copy_font_data().unwrap().to_vec());
+            self.cache.insert(name.clone(), Arc::new(font_data));
+            self.has_loaded = true;
         }
         self.curr_fonts.insert(name.clone());
-        self.cache.get(name).cloned()
     }
 
     /// 刷新字体缓存和字体定义
@@ -220,10 +215,7 @@ impl RenderConfigPanel {
         // 更新字体缓存
         for fonts in self.categories.values() {
             for (name, font) in fonts {
-                if self.cache.add_font(name, font).is_none() {
-                    ui.ctx().request_repaint();
-                    break;
-                }
+                self.cache.add_font(name, font);
             }
         }
 
