@@ -129,6 +129,7 @@ impl FontComboBox {
             .size;
 
         ComboBox::from_label("Select Font")
+            .width(200.0)
             .selected_text(selected.clone())
             .show_ui(ui, |ui| {
                 for (name, font) in fonts {
@@ -174,10 +175,12 @@ impl RenderConfigPanel {
         categories.insert(FontCategory::Korean, BTreeMap::new());
 
         for (name, font) in &system_fonts {
-            categories
-                .get_mut(&FontCategory::English)
-                .unwrap()
-                .insert(name.clone(), font.clone());
+            if Self::font_supports_english(&font) {
+                categories
+                    .get_mut(&FontCategory::English)
+                    .unwrap()
+                    .insert(name.clone(), font.clone());
+            }
 
             if Self::font_supports_chinese(&font) {
                 categories
@@ -318,6 +321,15 @@ impl RenderConfigPanel {
         false
     }
 
+    /// 检测是否支持英文字符
+    pub fn font_supports_english(font: &Font) -> bool {
+        let ranges = [
+            (0x0041, 0x005A, 1), // ASCII字符
+            (0x0061, 0x007A, 1), // ASCII字符
+        ];
+        Self::font_supports(font, &ranges)
+    }
+
     /// 检测是否支持中文字符
     pub fn font_supports_chinese(font: &Font) -> bool {
         let ranges = [
@@ -351,6 +363,17 @@ mod tests {
         for (name, font) in RenderConfigPanel::get_system_fonts() {
             let full_name = font.full_name();
             println!("{full_name}: {name}");
+        }
+    }
+
+    #[test]
+    fn test_font_supports_english() {
+        let fonts = RenderConfigPanel::get_system_fonts();
+        for (name, font) in fonts {
+            if RenderConfigPanel::font_supports_english(&font) {
+                let full_name = font.full_name();
+                println!("{full_name}: {name}");
+            }
         }
     }
 
