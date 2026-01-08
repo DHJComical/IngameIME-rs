@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod display;
-mod utils;
+mod panel;
 mod window;
 
 use std::error::Error;
@@ -18,14 +17,14 @@ use winit::{
 };
 
 use crate::{
-    display::IngameImeMenu,
+    panel::IngameImePanel,
     window::{EguiWindow, WindowMode},
 };
 
 struct IngameImeApp<'a> {
     window: EguiWindow<'a>,
     ime: Box<dyn InputContext>,
-    menu: IngameImeMenu,
+    panel: IngameImePanel,
 }
 
 impl IngameImeApp<'_> {
@@ -43,17 +42,13 @@ impl IngameImeApp<'_> {
         };
 
         debug!("Create Ui");
-        let menu = IngameImeMenu::new(&window.context);
+        let panel = IngameImePanel::new(&window.context);
 
         debug!("Show window");
         window.inner.set_visible(true);
 
         info!("IngameImeApp started");
-        Self {
-            window,
-            ime,
-            menu,
-        }
+        Self { window, ime, panel }
     }
 }
 
@@ -70,7 +65,7 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let app = self.app.as_mut().unwrap();
         let window = &mut app.window;
-        let menu = &mut app.menu;
+        let panel = &mut app.panel;
 
         match event {
             WindowEvent::CloseRequested => {
@@ -81,7 +76,7 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
                 window.resize(size.width, size.height);
             }
             WindowEvent::RedrawRequested => {
-                if let Some(mut platform) = window.render(menu) {
+                if let Some(mut platform) = window.render(panel) {
                     if let Some(ime) = platform.ime {
                         app.ime.set_activated(true);
 
