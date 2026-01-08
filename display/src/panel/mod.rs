@@ -1,9 +1,9 @@
-pub mod render_config;
+pub mod render;
 
 use egui::{Button, Context};
 use log::info;
 
-use crate::{panel::render_config::RenderConfigPanel, window::EguiMenu as EguiPanel};
+use crate::{panel::render::RenderConfigPanel, window::EguiMenu as EguiPanel};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum ActiveTab {

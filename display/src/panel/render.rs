@@ -1,8 +1,12 @@
-use std::{collections::BTreeMap, ops::RangeInclusive};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
-use egui::{DragValue, Theme};
+use egui::{ComboBox, DragValue, FontData, FontDefinitions, FontFamily, FontId, RichText, Theme};
 use font_kit::{font::Font, source::SystemSource};
-use log::error;
+use log::{debug, error};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FontCategory {
@@ -37,12 +41,117 @@ impl Default for RenderConfig {
     }
 }
 
+pub struct FontCache {
+    // 字体缓存<postscript_name, FontData>
+    cache: BTreeMap<String, Arc<FontData>>,
+    // 当前加载的字体<postscript_name>
+    curr_fonts: HashSet<String>,
+    // 之前加载的字体<postscript_name>
+    pub prev_fonts: HashSet<String>,
+    // 当前帧是否已经加载过新字体
+    has_loaded: bool,
+}
+
+impl Default for FontCache {
+    fn default() -> Self {
+        Self {
+            cache: BTreeMap::new(),
+            has_loaded: false,
+            curr_fonts: HashSet::new(),
+            prev_fonts: HashSet::new(),
+        }
+    }
+}
+
+impl FontCache {
+    pub fn is_loaded(&self, name: &String) -> bool {
+        self.prev_fonts.contains(name)
+    }
+
+    pub fn add_font(&mut self, name: &String, font: &Font) -> Option<Arc<FontData>> {
+        if !self.cache.contains_key(name) {
+            if !self.has_loaded {
+                let font_data = FontData::from_owned(font.copy_font_data().unwrap().to_vec());
+                self.cache.insert(name.clone(), Arc::new(font_data));
+                self.has_loaded = true;
+            } else {
+                return None;
+            }
+        }
+        self.curr_fonts.insert(name.clone());
+        self.cache.get(name).cloned()
+    }
+
+    /// 刷新字体缓存和字体定义
+    pub fn next_frame(&mut self, ui: &mut egui::Ui) {
+        self.cache.retain(|name, _| self.curr_fonts.contains(name));
+
+        // 字体数量不变且无新字体加载，说明无需更新
+        if self.curr_fonts.len() != self.prev_fonts.len() || self.has_loaded {
+            let mut font_defs = FontDefinitions::default();
+            for (name, font) in &self.cache {
+                font_defs.font_data.insert(name.clone(), font.clone());
+                font_defs
+                    .families
+                    .insert(FontFamily::Name(name.clone().into()), vec![name.clone()]);
+            }
+            ui.ctx().set_fonts(font_defs);
+            debug!("Font cache updated, total fonts: {}", self.cache.len());
+        }
+
+        self.prev_fonts = self.curr_fonts.clone();
+        self.curr_fonts.clear();
+        self.has_loaded = false;
+    }
+}
+
+struct FontComboBox;
+
+impl FontComboBox {
+    pub fn render(
+        ui: &mut egui::Ui,
+        cache: &mut FontCache,
+        selected: &mut String,
+        fonts: &BTreeMap<String, Font>,
+    ) {
+        let size = ui
+            .style()
+            .text_styles
+            .get(&egui::TextStyle::Body)
+            .unwrap()
+            .size;
+
+        ComboBox::from_label("Select Font")
+            .selected_text(selected.clone())
+            .show_ui(ui, |ui| {
+                for (name, font) in fonts {
+                    if cache.is_loaded(name) {
+                        if ui
+                            .selectable_label(
+                                *selected == *name,
+                                RichText::new(font.full_name()).font(FontId {
+                                    size,
+                                    family: FontFamily::Name(name.clone().into()),
+                                }),
+                            )
+                            .clicked()
+                        {
+                            *selected = name.clone();
+                        }
+                    }
+                }
+            });
+    }
+}
+
 #[derive(Default)]
 pub struct RenderConfigPanel {
     // 字体列表
     pub categories: BTreeMap<FontCategory, BTreeMap<String, Font>>,
     // 渲染配置
     pub config: RenderConfig,
+    // 字体缓存
+    pub cache: FontCache,
 }
 
 impl RenderConfigPanel {
@@ -57,7 +166,7 @@ impl RenderConfigPanel {
         categories.insert(FontCategory::Japanese, BTreeMap::new());
         categories.insert(FontCategory::Korean, BTreeMap::new());
 
-        for (name, font) in system_fonts {
+        for (name, font) in &system_fonts {
             categories
                 .get_mut(&FontCategory::English)
                 .unwrap()
@@ -107,6 +216,53 @@ impl RenderConfigPanel {
                 self.set_font_scale(self.config.font_scale, ui);
             }
         });
+
+        // 更新字体缓存
+        for fonts in self.categories.values() {
+            for (name, font) in fonts {
+                if self.cache.add_font(name, font).is_none() {
+                    ui.ctx().request_repaint();
+                    break;
+                }
+            }
+        }
+
+        // 渲染字体列表
+        let mut selected = String::new();
+        ui.push_id(1, |ui| {
+            FontComboBox::render(
+                ui,
+                &mut self.cache,
+                &mut selected,
+                &self.categories[&FontCategory::English],
+            );
+        });
+        ui.push_id(2, |ui| {
+            FontComboBox::render(
+                ui,
+                &mut self.cache,
+                &mut selected,
+                &self.categories[&FontCategory::Chinese],
+            );
+        });
+        ui.push_id(3, |ui| {
+            FontComboBox::render(
+                ui,
+                &mut self.cache,
+                &mut selected,
+                &self.categories[&FontCategory::Japanese],
+            );
+        });
+        ui.push_id(4, |ui| {
+            FontComboBox::render(
+                ui,
+                &mut self.cache,
+                &mut selected,
+                &self.categories[&FontCategory::Korean],
+            );
+        });
+
+        self.cache.next_frame(ui);
     }
 
     fn update_style(&mut self, ui: &mut egui::Ui) {
