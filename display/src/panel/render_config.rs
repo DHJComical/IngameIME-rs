@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
-use egui::{DragValue, FontDefinitions, Style, Theme, Visuals, style::default_text_styles};
+use egui::{DragValue, Theme};
 use font_kit::{font::Font, source::SystemSource};
-use log::{debug, error};
+use log::error;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FontCategory {
@@ -13,19 +13,39 @@ pub enum FontCategory {
 }
 
 pub struct RenderConfig {
-    // 字体列表
-    pub categories: BTreeMap<FontCategory, BTreeMap<String, Font>>,
-    // 选择的字体
-    pub fonts: BTreeMap<FontCategory, Option<String>>,
+    // 亮暗模式
+    pub dark_mode: bool,
     // 字体缩放
     pub font_scale: u32,
-    // 字体配置
-    pub font_config: FontDefinitions,
-    // 全局样式
-    pub style: Style,
+    // 选择的字体
+    pub fonts: BTreeMap<FontCategory, Option<String>>,
 }
 
-impl RenderConfig {
+impl Default for RenderConfig {
+    fn default() -> Self {
+        let mut fonts = BTreeMap::new();
+        fonts.insert(FontCategory::English, None);
+        fonts.insert(FontCategory::Chinese, None);
+        fonts.insert(FontCategory::Japanese, None);
+        fonts.insert(FontCategory::Korean, None);
+
+        Self {
+            dark_mode: true,
+            font_scale: 100,
+            fonts,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct RenderConfigPanel {
+    // 字体列表
+    pub categories: BTreeMap<FontCategory, BTreeMap<String, Font>>,
+    // 渲染配置
+    pub config: RenderConfig,
+}
+
+impl RenderConfigPanel {
     pub fn new() -> Self {
         let system_fonts = Self::get_system_fonts();
 
@@ -65,18 +85,9 @@ impl RenderConfig {
             }
         }
 
-        // 默认字体配置
-        let font_defines = FontDefinitions::default();
-
-        // 默认样式
-        let style = Style::default();
-
         Self {
             categories,
-            fonts: BTreeMap::new(),
-            font_scale: 100,
-            font_config: font_defines,
-            style,
+            ..Default::default()
         }
     }
 
@@ -86,35 +97,38 @@ impl RenderConfig {
             ui.label("Font Size:");
             if ui
                 .add(
-                    DragValue::new(&mut self.font_scale)
+                    DragValue::new(&mut self.config.font_scale)
                         .speed(1)
                         .range(RangeInclusive::new(50, 300)),
                 )
                 .changed()
             {
                 // 更新字体大小
-                self.set_font_size(self.font_scale, ui);
+                self.set_font_scale(self.config.font_scale, ui);
             }
         });
     }
 
-    pub fn set_theme(&mut self, dark_mode: bool, ui: &mut egui::Ui) {
-        self.style = if dark_mode {
+    fn update_style(&mut self, ui: &mut egui::Ui) {
+        let mut style = if self.config.dark_mode {
             Theme::Dark.default_style()
         } else {
             Theme::Light.default_style()
         };
-        self.set_font_size(self.font_scale, ui);
+        style.text_styles.iter_mut().for_each(|it| {
+            it.1.size *= self.config.font_scale as f32 / 100.0;
+        });
+        ui.ctx().set_style(style);
     }
 
-    pub fn set_font_size(&mut self, size: u32, ui: &mut egui::Ui) {
-        self.font_scale = size;
-        self.style.text_styles = default_text_styles();
-        self.style.text_styles.iter_mut().for_each(|it| {
-            it.1.size *= self.font_scale as f32 / 100.0;
-        });
-        ui.ctx().set_style(self.style.clone());
-        debug!("Updated font scale to {}", self.font_scale);
+    pub fn set_theme(&mut self, dark_mode: bool, ui: &mut egui::Ui) {
+        self.config.dark_mode = dark_mode;
+        self.update_style(ui);
+    }
+
+    pub fn set_font_scale(&mut self, size: u32, ui: &mut egui::Ui) {
+        self.config.font_scale = size;
+        self.update_style(ui);
     }
 
     pub fn get_system_fonts() -> BTreeMap<String, Font> {
@@ -132,28 +146,7 @@ impl RenderConfig {
     }
 
     pub fn font_supports(font: &Font, ranges: &[(u32, u32, usize)]) -> bool {
-        // 遍历每个区块，采样检测
         for &(start, end, step) in ranges {
-            // 1. 先检测区块起始、中间、结束三个关键码点（快速命中）
-            let key_points = [
-                start,                     // 起始点
-                start + (end - start) / 2, // 中间点
-                end.min(start + 1000),     // 结束点（最多检测前1000个，避免大区块）
-            ];
-
-            for &code_point in &key_points {
-                if code_point > end {
-                    continue;
-                }
-                // 检测关键码点是否有字形
-                if let Some(ch) = std::char::from_u32(code_point) {
-                    if font.glyph_for_char(ch).is_some() {
-                        return true; // 找到任意一个字形，立即返回
-                    }
-                }
-            }
-
-            // 2. 关键码点未命中时，按步长采样检测（进一步验证）
             for code_point in (start..=end).step_by(step) {
                 if let Some(ch) = std::char::from_u32(code_point) {
                     if font.glyph_for_char(ch).is_some() {
@@ -162,7 +155,6 @@ impl RenderConfig {
                 }
             }
         }
-
         false
     }
 
@@ -196,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_get_system_fonts() {
-        for (name, font) in RenderConfig::get_system_fonts() {
+        for (name, font) in RenderConfigPanel::get_system_fonts() {
             let full_name = font.full_name();
             println!("{full_name}: {name}");
         }
@@ -204,9 +196,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_chinese() {
-        let fonts = RenderConfig::get_system_fonts();
+        let fonts = RenderConfigPanel::get_system_fonts();
         for (name, font) in fonts {
-            if RenderConfig::font_supports_chinese(&font) {
+            if RenderConfigPanel::font_supports_chinese(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
@@ -215,9 +207,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_japanese() {
-        let fonts = RenderConfig::get_system_fonts();
+        let fonts = RenderConfigPanel::get_system_fonts();
         for (name, font) in fonts {
-            if RenderConfig::font_supports_japanese(&font) {
+            if RenderConfigPanel::font_supports_japanese(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
@@ -226,9 +218,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_korean() {
-        let fonts = RenderConfig::get_system_fonts();
+        let fonts = RenderConfigPanel::get_system_fonts();
         for (name, font) in fonts {
-            if RenderConfig::font_supports_korean(&font) {
+            if RenderConfigPanel::font_supports_korean(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
