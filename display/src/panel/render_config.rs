@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::RangeInclusive};
 
+use egui::{DragValue, FontDefinitions, Style, style::default_text_styles};
 use font_kit::{font::Font, source::SystemSource};
-use log::error;
+use log::{debug, error};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FontCategory {
@@ -11,14 +12,20 @@ pub enum FontCategory {
     Korean,
 }
 
-pub struct FontConfigPanel {
+pub struct RenderConfig {
     // 字体列表
-    categories: BTreeMap<FontCategory, BTreeMap<String, Font>>,
+    pub categories: BTreeMap<FontCategory, BTreeMap<String, Font>>,
     // 选择的字体
-    fonts: BTreeMap<FontCategory, Option<String>>,
+    pub fonts: BTreeMap<FontCategory, Option<String>>,
+    // 字体缩放
+    pub font_scale: u32,
+    // 字体配置
+    pub font_config: FontDefinitions,
+    // 全局样式
+    pub style: Style,
 }
 
-impl FontConfigPanel {
+impl RenderConfig {
     pub fn new() -> Self {
         let system_fonts = Self::get_system_fonts();
 
@@ -58,10 +65,42 @@ impl FontConfigPanel {
             }
         }
 
+        // 默认字体配置
+        let font_defines = FontDefinitions::default();
+
+        // 默认样式
+        let style = Style::default();
+
         Self {
             categories,
             fonts: BTreeMap::new(),
+            font_scale: 100,
+            font_config: font_defines,
+            style,
         }
+    }
+
+    pub fn render(&mut self, ui: &mut egui::Ui) {
+        // 字体大小
+        ui.horizontal(|ui| {
+            ui.label("Font Size:");
+            if ui
+                .add(
+                    DragValue::new(&mut self.font_scale)
+                        .speed(1)
+                        .range(RangeInclusive::new(50, 300)),
+                )
+                .changed()
+            {
+                // 更新字体大小
+                self.style.text_styles = default_text_styles();
+                self.style.text_styles.iter_mut().for_each(|it| {
+                    it.1.size *= self.font_scale as f32 / 100.0;
+                });
+                ui.ctx().set_style(self.style.clone());
+                debug!("Updated font scale to {}", self.font_scale);
+            }
+        });
     }
 
     pub fn get_system_fonts() -> BTreeMap<String, Font> {
@@ -143,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_get_system_fonts() {
-        for (name, font) in FontConfigPanel::get_system_fonts() {
+        for (name, font) in RenderConfig::get_system_fonts() {
             let full_name = font.full_name();
             println!("{full_name}: {name}");
         }
@@ -151,9 +190,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_chinese() {
-        let fonts = FontConfigPanel::get_system_fonts();
+        let fonts = RenderConfig::get_system_fonts();
         for (name, font) in fonts {
-            if FontConfigPanel::font_supports_chinese(&font) {
+            if RenderConfig::font_supports_chinese(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
@@ -162,9 +201,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_japanese() {
-        let fonts = FontConfigPanel::get_system_fonts();
+        let fonts = RenderConfig::get_system_fonts();
         for (name, font) in fonts {
-            if FontConfigPanel::font_supports_japanese(&font) {
+            if RenderConfig::font_supports_japanese(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
@@ -173,9 +212,9 @@ mod tests {
 
     #[test]
     fn test_font_supports_korean() {
-        let fonts = FontConfigPanel::get_system_fonts();
+        let fonts = RenderConfig::get_system_fonts();
         for (name, font) in fonts {
-            if FontConfigPanel::font_supports_korean(&font) {
+            if RenderConfig::font_supports_korean(&font) {
                 let full_name = font.full_name();
                 println!("{full_name}: {name}");
             }
