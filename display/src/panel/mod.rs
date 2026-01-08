@@ -28,7 +28,7 @@ impl EguiPanel for IngameImePanel {
                     self.active_tab = ActiveTab::General;
                 }
                 if ui
-                    .selectable_label(self.active_tab == ActiveTab::Render, "Render Config")
+                    .selectable_label(self.active_tab == ActiveTab::Render, "Render")
                     .clicked()
                 {
                     self.active_tab = ActiveTab::Render;
