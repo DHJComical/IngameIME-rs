@@ -84,11 +84,23 @@ impl FontCache {
         // 字体数量不变且无新字体加载，说明无需更新
         if self.curr_fonts.len() != self.prev_fonts.len() || self.has_loaded {
             let mut font_defs = FontDefinitions::default();
+            // egui默认字体
+            let defaults = font_defs
+                .families
+                .get(&FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default();
             for (name, font) in &self.cache {
+                // 字体数据
                 font_defs.font_data.insert(name.clone(), font.clone());
+                // 字体链
+                let chain = std::iter::once(name.clone())
+                    .chain(defaults.clone())
+                    .collect::<Vec<_>>();
+                // 字体族
                 font_defs
                     .families
-                    .insert(FontFamily::Name(name.clone().into()), vec![name.clone()]);
+                    .insert(FontFamily::Name(name.clone().into()), chain);
             }
             ui.ctx().set_fonts(font_defs);
             debug!("Font cache updated, total fonts: {}", self.cache.len());
