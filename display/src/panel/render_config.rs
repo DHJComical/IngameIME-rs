@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
-use egui::{DragValue, FontDefinitions, Style, style::default_text_styles};
+use egui::{DragValue, FontDefinitions, Style, Theme, Visuals, style::default_text_styles};
 use font_kit::{font::Font, source::SystemSource};
 use log::{debug, error};
 
@@ -93,14 +93,28 @@ impl RenderConfig {
                 .changed()
             {
                 // 更新字体大小
-                self.style.text_styles = default_text_styles();
-                self.style.text_styles.iter_mut().for_each(|it| {
-                    it.1.size *= self.font_scale as f32 / 100.0;
-                });
-                ui.ctx().set_style(self.style.clone());
-                debug!("Updated font scale to {}", self.font_scale);
+                self.set_font_size(self.font_scale, ui);
             }
         });
+    }
+
+    pub fn set_theme(&mut self, dark_mode: bool, ui: &mut egui::Ui) {
+        self.style = if dark_mode {
+            Theme::Dark.default_style()
+        } else {
+            Theme::Light.default_style()
+        };
+        self.set_font_size(self.font_scale, ui);
+    }
+
+    pub fn set_font_size(&mut self, size: u32, ui: &mut egui::Ui) {
+        self.font_scale = size;
+        self.style.text_styles = default_text_styles();
+        self.style.text_styles.iter_mut().for_each(|it| {
+            it.1.size *= self.font_scale as f32 / 100.0;
+        });
+        ui.ctx().set_style(self.style.clone());
+        debug!("Updated font scale to {}", self.font_scale);
     }
 
     pub fn get_system_fonts() -> BTreeMap<String, Font> {

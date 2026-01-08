@@ -1,6 +1,6 @@
 pub mod render_config;
 
-use egui::Context;
+use egui::{Button, Context, Visuals};
 use log::info;
 
 use crate::{panel::render_config::RenderConfig, window::EguiMenu as EguiPanel};
@@ -21,6 +21,28 @@ impl EguiPanel for IngameImePanel {
     fn render(&mut self, context: &Context) {
         egui::Window::new("IngameIME").show(&context, |ui| {
             ui.horizontal(|ui| {
+                // 亮暗主题
+                if self.render_config.style.visuals.dark_mode {
+                    if ui
+                        .add(Button::new("☀").frame(false))
+                        .on_hover_text("Switch to light mode")
+                        .clicked()
+                    {
+                        self.render_config.set_theme(false, ui);
+                    }
+                } else {
+                    if ui
+                        .add(Button::new("🌙").frame(false))
+                        .on_hover_text("Switch to dark mode")
+                        .clicked()
+                    {
+                        self.render_config.set_theme(true, ui);
+                    }
+                }
+
+                ui.separator();
+
+                // 选项卡
                 if ui
                     .selectable_label(self.active_tab == ActiveTab::General, "General")
                     .clicked()
