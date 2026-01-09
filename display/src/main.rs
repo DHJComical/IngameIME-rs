@@ -42,7 +42,7 @@ impl IngameImeApp<'_> {
         };
 
         debug!("Create Ui");
-        let panel = IngameImePanel::new(&window.context);
+        let panel = IngameImePanel::new();
 
         debug!("Show window");
         window.inner.set_visible(true);
