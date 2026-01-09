@@ -73,6 +73,7 @@ impl FontCache {
                     .insert(FontFamily::Name(name.clone().into()), chain);
             }
             ui.ctx().set_fonts(font_defs);
+            ui.ctx().request_repaint();
             debug!("Font cache updated, total fonts: {}", self.cache.len());
         }
 
