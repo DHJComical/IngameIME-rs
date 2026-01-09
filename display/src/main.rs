@@ -5,9 +5,14 @@ mod window;
 
 use std::error::Error;
 
-use ingameime_core::interface::{imm32::Imm32InputContext, lib::InputContext};
-use log::{debug, info};
+use ingameime_core::interface::lib::InputContext;
+
+#[cfg(windows)]
+use ingameime_core::interface::imm32::Imm32InputContext;
+#[cfg(windows)]
 use wgpu::rwh::RawWindowHandle;
+
+use log::{debug, info, warn};
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -23,7 +28,7 @@ use crate::{
 
 struct IngameImeApp<'a> {
     window: EguiWindow<'a>,
-    ime: Box<dyn InputContext>,
+    ime: Option<Box<dyn InputContext>>,
     panel: IngameImePanel,
 }
 
@@ -35,9 +40,13 @@ impl IngameImeApp<'_> {
 
         debug!("Create InputContext");
         let ime = match window.handle {
-            RawWindowHandle::Win32(handle) => Imm32InputContext::new(handle.hwnd, true).unwrap(),
+            #[cfg(windows)]
+            RawWindowHandle::Win32(handle) => {
+                Some(Imm32InputContext::new(handle.hwnd, true).unwrap())
+            }
             _ => {
-                panic!("Unsupported platform");
+                warn!("Unsupported platform");
+                None
             }
         };
 
@@ -77,18 +86,20 @@ impl<'a> ApplicationHandler for AppHandler<'a> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(mut platform) = window.render(panel) {
-                    if let Some(ime) = platform.ime {
-                        app.ime.set_activated(true);
+                    if let Some(app_ime) = &mut app.ime {
+                        if let Some(ime) = platform.ime {
+                            app_ime.set_activated(true);
 
-                        let rect = ime.cursor_rect;
-                        app.ime.set_preedit_rect(
-                            rect.left() as i32,
-                            rect.top() as i32,
-                            rect.width() as i32,
-                            rect.height() as i32,
-                        );
-                    } else {
-                        app.ime.set_activated(false);
+                            let rect = ime.cursor_rect;
+                            app_ime.set_preedit_rect(
+                                rect.left() as i32,
+                                rect.top() as i32,
+                                rect.width() as i32,
+                                rect.height() as i32,
+                            );
+                        } else {
+                            app_ime.set_activated(false);
+                        }
                     }
                     platform.ime = None;
                     window.handler_platform(platform);

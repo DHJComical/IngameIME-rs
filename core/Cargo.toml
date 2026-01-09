@@ -8,7 +8,7 @@ edition = "2024"
 log = "0.4.29"
 
 # windows
-[dependencies.windows]
+[target.'cfg(windows)'.dependencies.windows]
 version = "0.62"
 features = [
     "Win32_Foundation",
