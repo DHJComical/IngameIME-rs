@@ -1,5 +1,6 @@
-use std::{collections::BTreeMap, ops::RangeInclusive};
+use std::{collections::BTreeMap, iter, ops::RangeInclusive};
 
+use ab_glyph::FontVec;
 use egui::{ComboBox, DragValue, FontFamily, FontId, RichText, Theme};
 use font_kit::{font::Font, source::SystemSource};
 use log::error;
@@ -224,6 +225,12 @@ impl RenderConfigPanel {
             .unwrap_or_default()
             .into_iter()
             .filter_map(|it| it.load().ok())
+            .filter(|font| {
+                font.copy_font_data()
+                    .map(|it| it.to_vec())
+                    .and_then(|it| FontVec::try_from_vec(it).ok())
+                    .is_some()
+            })
             .filter_map(|font| font.postscript_name().map(|name| (name, font)))
             .fold(BTreeMap::new(), |mut acc, (name, handle)| {
                 acc.entry(name).or_insert(handle);
