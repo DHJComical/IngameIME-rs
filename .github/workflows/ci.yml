@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    paths-ignore:
+      - ".github/workflows/**"
+      - "**.md"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build and test on Windows (primary target platform)
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check Rust format
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: Run Clippy lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        continue-on-error: true
+
+      - name: Build workspace (release)
+        run: cargo build --workspace --release --verbose
+
+      - name: Run tests (core library)
+        run: cargo test --package ingameime-core --verbose
+
+      - name: Build display (check only, no GUI tests)
+        run: cargo build --package ingameime-display --release --verbose
+
+      - name: Upload Windows DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingameime-core-windows
+          path: target/release/ingameime_core.dll
+          retention-days: 14
+
+  # Build on Linux (cross-compilation check)
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build workspace (release)
+        run: cargo build --workspace --release --verbose
+        continue-on-error: true
+
+      - name: Run Clippy lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        continue-on-error: true
+
+  # Release build with artifact
+  release:
+    needs: [build-windows]
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --workspace --release --verbose
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/release/ingameime_core.dll" -DestinationPath "ingameime-core-windows.zip"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ingameime-core-windows.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
