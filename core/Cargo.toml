@@ -9,9 +9,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # logging
 log = "0.4.29"
+env_logger = "0.11.8"
+windows-core = "0.62.2"
 
-# JNI
-jni = "0.21"
+# JNI - use 0.21.x for stable API
+jni = "0.21.1"
 
 # windows
 [target.'cfg(windows)'.dependencies.windows]
@@ -21,4 +23,7 @@ features = [
     "Win32_UI_Input_Ime",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_UI_TextServices",
 ]
