@@ -4,7 +4,7 @@
 #![allow(non_snake_case)]
 
 use jni::objects::{JClass, JObject, JValue, JObjectArray, JString, GlobalRef};
-use jni::sys::{jboolean, jint, jlong, JNI_FALSE, JNI_TRUE};
+use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use std::num::NonZeroIsize;
 use std::sync::OnceLock;
 use jni::JNIEnv;
@@ -201,6 +201,22 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             let wrapper = &mut *(ptr as *mut ImeContext);
             wrapper.ctx.set_preedit_rect(x, y, width, height);
         }
+    }
+}
+
+// ============================================================================
+// Library version
+// ============================================================================
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1get_1version(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let version = env!("CARGO_PKG_VERSION");
+    match env.new_string(version) {
+        Ok(s) => s.into_raw(),
+        Err(_) => JObject::null().into_raw(),
     }
 }
 
