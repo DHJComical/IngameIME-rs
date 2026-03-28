@@ -184,7 +184,7 @@ impl Imm32InputContext {
                 let proc: WNDPROC = std::mem::transmute(SetWindowLongPtrW(
                     hwnd,
                     GWLP_WNDPROC,
-                    ingame_ime_proc as isize,
+                    ingame_ime_proc as *const () as isize,
                 ));
 
                 debug!("Create context");

@@ -69,9 +69,9 @@ pub trait InputContext {
     /// Retrieves the current input mode.
     fn get_input_mode(&self) -> InputMode;
 
-    /// Set if the input method is activated.
-    fn get_activated(&self) -> bool;
     /// Get if the input method is activated.
+    fn get_activated(&self) -> bool;
+    /// Set if the input method is activated.
     fn set_activated(&mut self, activated: bool);
 
     /// Sets the rectangle area for positioning candidate window.
@@ -83,3 +83,6 @@ pub trait InputContext {
     fn set_input_source_callback(&mut self, callback: InputSourceCallback);
     fn set_input_mode_callback(&mut self, callback: InputModeCallback);
 }
+
+/// Version string for the library
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

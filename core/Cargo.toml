@@ -3,9 +3,15 @@ name = "ingameime-core"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # logging
 log = "0.4.29"
+
+# JNI
+jni = "0.21"
 
 # windows
 [target.'cfg(windows)'.dependencies.windows]

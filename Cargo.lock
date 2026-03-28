@@ -1195,6 +1195,7 @@ dependencies = [
 name = "ingameime-core"
 version = "0.1.0"
 dependencies = [
+ "jni",
  "log",
  "windows 0.62.2",
 ]
