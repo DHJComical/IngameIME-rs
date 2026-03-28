@@ -86,6 +86,10 @@ unsafe extern "system" fn ingame_ime_proc(
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::Begin);
                     }
+                    // Also fetch candidate list for new composition
+                    if context.ui_less {
+                        context.run_candidate_update();
+                    }
                     return LRESULT(1);
                 }
                 WM_IME_COMPOSITION => {
@@ -99,6 +103,10 @@ unsafe extern "system" fn ingame_ime_proc(
                     if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_RESULTSTR) {
                         context.run_commit();
                     }
+                    // Also fetch candidate list on composition update
+                    if context.ui_less {
+                        context.run_candidate_update();
+                    }
                     return LRESULT(1);
                 }
                 WM_IME_ENDCOMPOSITION => {
@@ -107,20 +115,16 @@ unsafe extern "system" fn ingame_ime_proc(
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::End);
                     }
-                    // candidate event: end
-                    if let Some(cb) = &context.candidate_cb {
-                        cb(CandidateEvent::End);
-                    }
+                    // Don't send CandidateEvent::End here as it would clear the candidate list
+                    // when user selects a character and continues typing (e.g., "shenren" -> "神" -> "ren")
+                    // The candidate list will be updated when new composition starts
                     return LRESULT(1);
                 }
                 WM_IME_NOTIFY => match wparam.0 as u32 {
                     IMN_OPENCANDIDATE => {
                         log_debug("IMN_OPENCANDIDATE");
-                        if context.ui_less {
-                            if let Some(cb) = &context.candidate_cb {
-                                cb(CandidateEvent::Begin);
-                            }
-                        }
+                        // Don't send Begin event as it would clear the candidate list
+                        // Candidate list will be fetched on IMN_CHANGECANDIDATE
                         return LRESULT(1);
                     }
                     IMN_CHANGECANDIDATE => {
@@ -300,6 +304,10 @@ impl Imm32InputContext {
     fn run_candidate_update(&self) {
         unsafe {
             let size = ImmGetCandidateListW(self.himc, 0, None, 0);
+            
+            let mut candidates = Vec::<String>::new();
+            let mut selected: usize = 0;
+            
             if size > 0 {
                 log_debug("Get Candidates");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
@@ -311,7 +319,7 @@ impl Imm32InputContext {
                 let items = candidate.dwPageSize as usize;
 
                 // candidate strings
-                let mut candidates = Vec::<String>::with_capacity(items);
+                let mut candidates_vec = Vec::<String>::with_capacity(items);
 
                 // offset array
                 let offsets = buffer.as_ptr().offset(6 * 4) as *const u32;
@@ -337,46 +345,50 @@ impl Imm32InputContext {
                     for part in text.split(char::is_whitespace) {
                         let trimmed = part.trim();
                         if !trimmed.is_empty() {
-                            candidates.push(trimmed.to_string());
+                            candidates_vec.push(trimmed.to_string());
                         }
                     }
                 }
 
                 log_debug(&format!(
                     "Parsed {} candidates from {} items",
-                    candidates.len(),
+                    candidates_vec.len(),
                     items
                 ));
-                for (i, c) in candidates.iter().enumerate() {
+                for (i, c) in candidates_vec.iter().enumerate() {
                     log_debug(&format!("  [{}] {}", i, c));
                 }
 
                 // Apply max candidates limit
                 let max_candidates = self.candidate_config.max_candidates;
-                if candidates.len() > max_candidates {
-                    candidates.truncate(max_candidates);
+                if candidates_vec.len() > max_candidates {
+                    candidates_vec.truncate(max_candidates);
                     log_debug(&format!("Truncated to {} candidates", max_candidates));
                 }
 
                 // convert absolute pos to relative pos
-                let selected = (candidate.dwSelection - candidate.dwPageStart) as usize;
-                let selected = if selected < candidates.len() {
+                selected = (candidate.dwSelection - candidate.dwPageStart) as usize;
+                selected = if selected < candidates_vec.len() {
                     selected
                 } else {
                     0
                 };
+                
+                candidates = candidates_vec;
+            } else {
+                log_debug("No candidates available (size=0)");
+            }
 
-                log_debug(&format!(
-                    "Sending {} candidates to callback, selected={}",
-                    candidates.len(),
-                    selected
-                ));
-                if let Some(cb) = &self.candidate_cb {
-                    cb(CandidateEvent::Update(Candidate {
-                        candidates,
-                        selected,
-                    }));
-                }
+            log_debug(&format!(
+                "Sending {} candidates to callback, selected={}",
+                candidates.len(),
+                selected
+            ));
+            if let Some(cb) = &self.candidate_cb {
+                cb(CandidateEvent::Update(Candidate {
+                    candidates,
+                    selected,
+                }));
             }
         }
     }
