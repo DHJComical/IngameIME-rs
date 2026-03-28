@@ -2,29 +2,44 @@ use std::char::decode_utf16;
 use std::num::NonZeroIsize;
 use std::slice::from_raw_parts;
 
-use log::{debug, error, info, warn};
+use windows::core::w;
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::UI::Input::Ime::{
-    CANDIDATEFORM, CANDIDATELIST, CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL, GCS_COMPSTR,
-    GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING,
-    IME_CONVERSION_MODE, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE,
-    IMN_SETCONVERSIONMODE, ISC_SHOWUICANDIDATEWINDOW, ISC_SHOWUICOMPOSITIONWINDOW,
-    ImmAssociateContext, ImmCreateContext, ImmDestroyContext, ImmGetCandidateListW,
-    ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME, ImmSetCandidateWindow,
-    ImmSetCompositionWindow, ImmSetOpenStatus, NI_COMPOSITIONSTR,
+    ImmAssociateContext, ImmCreateContext, ImmDestroyContext, ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME,
+    ImmSetCandidateWindow, ImmSetCompositionWindow, ImmSetOpenStatus, CANDIDATEFORM, CANDIDATELIST,
+    CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL,
+    GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR,
+    HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING, IME_CONVERSION_MODE,
+    IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE, IMN_SETCONVERSIONMODE,
+    ISC_SHOWUICANDIDATEWINDOW, ISC_SHOWUICOMPOSITIONWINDOW, NI_COMPOSITIONSTR,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, DefWindowProcW, GWLP_WNDPROC, GetPropW, SetPropW, SetWindowLongPtrW,
+    CallWindowProcW, DefWindowProcW, GetPropW, SetPropW, SetWindowLongPtrW, GWLP_WNDPROC,
     WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_NOTIFY, WM_IME_SETCONTEXT,
     WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_INPUTLANGCHANGEREQUEST, WNDPROC,
 };
-use windows::core::w;
 
 use crate::interface::lib::{
-    Candidate, CandidateCallback, CandidateEvent, CommitCallback, InputContext, InputMode,
-    InputModeCallback, InputSourceCallback, InputSourceInfo, PreEdit, PreEditCallback,
+    Candidate, CandidateCallback, CandidateConfig, CandidateEvent, CommitCallback, InputContext,
+    InputMode, InputModeCallback, InputSourceCallback, InputSourceInfo, PreEdit, PreEditCallback,
     PreEditEvent,
 };
+
+fn log_info(msg: &str) {
+    crate::interface::jni_api::log_info(msg);
+}
+
+fn log_debug(msg: &str) {
+    crate::interface::jni_api::log_debug(msg);
+}
+
+fn log_error(msg: &str) {
+    crate::interface::jni_api::log_info(&format!("ERROR: {}", msg));
+}
+
+fn log_warn(msg: &str) {
+    crate::interface::jni_api::log_info(&format!("WARN: {}", msg));
+}
 
 #[allow(dead_code)]
 #[allow(unused_assignments)]
@@ -41,11 +56,11 @@ unsafe extern "system" fn ingame_ime_proc(
 
             match msg {
                 WM_INPUTLANGCHANGEREQUEST => {
-                    debug!("WM_INPUTLANGCHANGEREQUEST");
+                    log_debug("WM_INPUTLANGCHANGEREQUEST");
                     return DefWindowProcW(hwnd, msg, wparam, lparam);
                 }
                 WM_INPUTLANGCHANGE => {
-                    debug!("WM_INPUTLANGCHANGE");
+                    log_debug("WM_INPUTLANGCHANGE");
                     // notify input source change
                     if let Some(cb) = &context.input_source_cb {
                         cb(context.get_input_source());
@@ -57,7 +72,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_SETCONTEXT => {
-                    debug!("WM_SETCONTEXT");
+                    log_debug("WM_SETCONTEXT");
                     let mut lparam = lparam.0;
                     lparam &= !ISC_SHOWUICOMPOSITIONWINDOW as isize;
                     if context.ui_less {
@@ -66,7 +81,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return DefWindowProcW(hwnd, msg, wparam, LPARAM(lparam));
                 }
                 WM_IME_STARTCOMPOSITION => {
-                    debug!("WM_IME_STARTCOMPOSITION");
+                    log_debug("WM_IME_STARTCOMPOSITION");
                     // preedit event: begin
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::Begin);
@@ -74,7 +89,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_COMPOSITION => {
-                    debug!("WM_IME_COMPOSITION");
+                    log_debug("WM_IME_COMPOSITION");
                     // preedit event: update
                     if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_COMPSTR | GCS_CURSORPOS)
                     {
@@ -87,7 +102,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     return LRESULT(1);
                 }
                 WM_IME_ENDCOMPOSITION => {
-                    debug!("WM_IME_ENDCOMPOSITION");
+                    log_debug("WM_IME_ENDCOMPOSITION");
                     // preedit event: end
                     if let Some(cb) = &context.preedit_cb {
                         cb(PreEditEvent::End);
@@ -100,7 +115,7 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 WM_IME_NOTIFY => match wparam.0 as u32 {
                     IMN_OPENCANDIDATE => {
-                        debug!("IMN_OPENCANDIDATE");
+                        log_debug("IMN_OPENCANDIDATE");
                         if context.ui_less {
                             if let Some(cb) = &context.candidate_cb {
                                 cb(CandidateEvent::Begin);
@@ -109,14 +124,14 @@ unsafe extern "system" fn ingame_ime_proc(
                         return LRESULT(1);
                     }
                     IMN_CHANGECANDIDATE => {
-                        debug!("IMN_CHANGECANDIDATE");
+                        log_debug("IMN_CHANGECANDIDATE");
                         if context.ui_less {
                             context.run_candidate_update();
                         }
                         return LRESULT(1);
                     }
                     IMN_CLOSECANDIDATE => {
-                        debug!("IMN_CLOSECANDIDATE");
+                        log_debug("IMN_CLOSECANDIDATE");
                         if context.ui_less {
                             if let Some(cb) = &context.candidate_cb {
                                 cb(CandidateEvent::End);
@@ -125,7 +140,7 @@ unsafe extern "system" fn ingame_ime_proc(
                         return LRESULT(1);
                     }
                     IMN_SETCONVERSIONMODE => {
-                        debug!("IMN_SETCONVERSIONMODE");
+                        log_debug("IMN_SETCONVERSIONMODE");
                         // notify input mode change
                         if let Some(cb) = &context.input_mode_cb {
                             cb(context.get_input_mode());
@@ -137,7 +152,7 @@ unsafe extern "system" fn ingame_ime_proc(
                     }
                 },
                 WM_IME_CHAR => {
-                    debug!("WM_IME_CHAR");
+                    log_debug("WM_IME_CHAR");
                     // commit already handled in WM_IME_COMPOSITION, prevent from multiple conversion
                     return LRESULT(1);
                 }
@@ -148,7 +163,7 @@ unsafe extern "system" fn ingame_ime_proc(
             }
         }
 
-        warn!("Unable to GetPropW for IngameIME_Userdata");
+        log_warn("Unable to GetPropW for IngameIME_Userdata");
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 }
@@ -166,28 +181,29 @@ pub struct Imm32InputContext {
     candidate_cb: Option<CandidateCallback>,
     input_source_cb: Option<InputSourceCallback>,
     input_mode_cb: Option<InputModeCallback>,
+    candidate_config: CandidateConfig,
 }
 
 impl Imm32InputContext {
     /// ui_less: whether to show candidate window or not(true: hide, false:show)
     pub fn new(hwnd: NonZeroIsize, ui_less: bool) -> Option<Box<dyn InputContext>> {
-        info!("Creating Imm32InputContext");
+        log_info("Creating Imm32InputContext");
         unsafe {
             let hwnd: HWND = std::mem::transmute(hwnd);
-            debug!("Create HIMC");
+            log_debug("Create HIMC");
             let himc = ImmCreateContext();
             if !himc.is_invalid() {
-                debug!("Associate NULL HIMC to disable IME");
+                log_debug("Associate NULL HIMC to disable IME");
                 let prev = ImmAssociateContext(hwnd, HIMC::default());
 
-                debug!("Replace WNDPROC");
+                log_debug("Replace WNDPROC");
                 let proc: WNDPROC = std::mem::transmute(SetWindowLongPtrW(
                     hwnd,
                     GWLP_WNDPROC,
                     ingame_ime_proc as *const () as isize,
                 ));
 
-                debug!("Create context");
+                log_debug("Create context");
                 let context = Box::new(Imm32InputContext {
                     hwnd,
                     prev,
@@ -201,27 +217,28 @@ impl Imm32InputContext {
                     candidate_cb: None,
                     input_source_cb: None,
                     input_mode_cb: None,
+                    candidate_config: CandidateConfig::default(),
                 });
 
-                debug!("Save userdata for WNDPROC");
+                log_debug("Save userdata for WNDPROC");
                 let ptr = &*context as *const Imm32InputContext as _;
                 match SetPropW(hwnd, w!("IngameIME_Userdata"), Some(HANDLE(ptr))) {
                     Ok(_) => {
-                        debug!("Config OpenStatus");
+                        log_debug("Config OpenStatus");
                         if (!ImmSetOpenStatus(himc, true)).into() {
-                            error!("Unable to SetOpenStatus");
+                            log_error("Unable to SetOpenStatus");
                             return None;
                         }
-                        info!("Imm32InputContext created");
+                        log_info("Imm32InputContext created");
                         Some(context)
                     }
                     Err(e) => {
-                        error!("Unable to SetPropW for IngameIME_Userdata: {e}");
+                        log_error("Unable to SetPropW for IngameIME_Userdata: {e}");
                         None
                     }
                 }
             } else {
-                error!("Unable to create HIMC");
+                log_error("Unable to create HIMC");
                 None
             }
         }
@@ -231,7 +248,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCompositionStringW(self.himc, GCS_COMPSTR, None, 0);
             if size > 0 {
-                debug!("Get Preedit");
+                log_debug("Get Preedit");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCompositionStringW(
                     self.himc,
@@ -244,10 +261,10 @@ impl Imm32InputContext {
                     .map(|r| r.unwrap_or('�'))
                     .collect();
 
-                debug!("Get Cursor Pos");
+                log_debug("Get Cursor Pos");
                 let cursor = ImmGetCompositionStringW(self.himc, GCS_CURSORPOS, None, 0) as usize;
 
-                debug!("Notify PreEditEvent: Updated");
+                log_debug("Notify PreEditEvent: Updated");
                 if let Some(cb) = &self.preedit_cb {
                     cb(PreEditEvent::Update(PreEdit { text, cursor }));
                 }
@@ -259,7 +276,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCompositionStringW(self.himc, GCS_RESULTSTR, None, 0);
             if size > 0 {
-                debug!("Get Commit String");
+                log_debug("Get Commit String");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCompositionStringW(
                     self.himc,
@@ -272,7 +289,7 @@ impl Imm32InputContext {
                     .map(|r| r.unwrap_or('�'))
                     .collect();
 
-                debug!("Notify CommitEvent");
+                log_debug("Notify CommitEvent");
                 if let Some(cb) = &self.commit_cb {
                     cb(text);
                 }
@@ -284,7 +301,7 @@ impl Imm32InputContext {
         unsafe {
             let size = ImmGetCandidateListW(self.himc, 0, None, 0);
             if size > 0 {
-                debug!("Get Candidates");
+                log_debug("Get Candidates");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
                 ImmGetCandidateListW(self.himc, 0, Some(buffer.as_mut_ptr() as _), size);
 
@@ -317,13 +334,43 @@ impl Imm32InputContext {
                     let text: String = decode_utf16(u16_slice.iter().copied())
                         .map(|r| r.unwrap_or('�'))
                         .collect();
-                    candidates.push(text);
+                    for part in text.split(char::is_whitespace) {
+                        let trimmed = part.trim();
+                        if !trimmed.is_empty() {
+                            candidates.push(trimmed.to_string());
+                        }
+                    }
+                }
+
+                log_debug(&format!(
+                    "Parsed {} candidates from {} items",
+                    candidates.len(),
+                    items
+                ));
+                for (i, c) in candidates.iter().enumerate() {
+                    log_debug(&format!("  [{}] {}", i, c));
+                }
+
+                // Apply max candidates limit
+                let max_candidates = self.candidate_config.max_candidates;
+                if candidates.len() > max_candidates {
+                    candidates.truncate(max_candidates);
+                    log_debug(&format!("Truncated to {} candidates", max_candidates));
                 }
 
                 // convert absolute pos to relative pos
                 let selected = (candidate.dwSelection - candidate.dwPageStart) as usize;
+                let selected = if selected < candidates.len() {
+                    selected
+                } else {
+                    0
+                };
 
-                debug!("Notify CandidateEvent: Update");
+                log_debug(&format!(
+                    "Sending {} candidates to callback, selected={}",
+                    candidates.len(),
+                    selected
+                ));
                 if let Some(cb) = &self.candidate_cb {
                     cb(CandidateEvent::Update(Candidate {
                         candidates,
@@ -342,7 +389,7 @@ impl InputContext for Imm32InputContext {
 
     fn get_input_mode(&self) -> InputMode {
         unsafe {
-            debug!("Get InputMode");
+            log_debug("Get InputMode");
             let mut mode = IME_CONVERSION_MODE(0);
             let _ = ImmGetConversionStatus(self.himc, Some(&mut mode as *mut _), None);
             if mode.contains(IME_CMODE_NATIVE) {
@@ -362,11 +409,11 @@ impl InputContext for Imm32InputContext {
             self.activated = activated;
             unsafe {
                 if self.activated {
-                    info!("Set Activated.");
+                    log_info("Set Activated.");
                     // associate our himc to turn on ime
                     ImmAssociateContext(self.hwnd, self.himc);
                 } else {
-                    info!("Set De-activated.");
+                    log_info("Set De-activated.");
                     // notify ime that we are going to turn off
                     let _ = ImmNotifyIME(self.himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
                     ImmAssociateContext(self.hwnd, HIMC::default());
@@ -396,7 +443,7 @@ impl InputContext for Imm32InputContext {
         };
         if self.rect != rect {
             self.rect = rect;
-            debug!("Set CandidateWindow Pos");
+            log_debug("Set CandidateWindow Pos");
             // candidate window
             unsafe {
                 let mut candidate = CANDIDATEFORM::default();
@@ -405,10 +452,10 @@ impl InputContext for Imm32InputContext {
                 candidate.ptCurrentPos.y = y;
                 candidate.rcArea = rect;
                 if (!ImmSetCandidateWindow(self.himc, &candidate)).into() {
-                    error!("Unable to SetCandidateWindow");
+                    log_error("Unable to SetCandidateWindow");
                 }
             }
-            debug!("Set PreEditWindow Pos");
+            log_debug("Set PreEditWindow Pos");
             unsafe {
                 let mut composition = COMPOSITIONFORM::default();
                 composition.dwStyle = CFS_RECT;
@@ -416,7 +463,7 @@ impl InputContext for Imm32InputContext {
                 composition.ptCurrentPos.y = y;
                 composition.rcArea = rect;
                 if (!ImmSetCompositionWindow(self.himc, &composition)).into() {
-                    error!("Unable to SetPreEditWindow");
+                    log_error("Unable to SetPreEditWindow");
                 }
             }
         }
@@ -441,12 +488,20 @@ impl InputContext for Imm32InputContext {
     fn set_input_mode_callback(&mut self, callback: InputModeCallback) {
         self.input_mode_cb = Some(callback);
     }
+
+    fn get_candidate_config(&self) -> CandidateConfig {
+        self.candidate_config.clone()
+    }
+
+    fn set_candidate_config(&mut self, config: CandidateConfig) {
+        self.candidate_config = config;
+    }
 }
 
 impl Drop for Imm32InputContext {
     fn drop(&mut self) {
         unsafe {
-            info!("Dropping Imm32InputContext");
+            log_info("Dropping Imm32InputContext");
             // disable ime
             self.set_activated(false);
             // restore previous wndproc
@@ -454,15 +509,15 @@ impl Drop for Imm32InputContext {
             // clear pointer which will be invalid
             let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Some(HANDLE::default()))
                 .inspect_err(|e| {
-                    error!("Unable to SetPropW for IngameIME_Userdata: {e}");
+                    log_error("Unable to SetPropW for IngameIME_Userdata: {e}");
                 });
             // restore previous himc
             ImmAssociateContext(self.hwnd, self.prev);
             // destroy context
             if (!ImmDestroyContext(self.himc)).into() {
-                error!("Unable to destroy HIMC");
+                log_error("Unable to destroy HIMC");
             }
-            info!("Imm32InputContext dropped");
+            log_info("Imm32InputContext dropped");
         }
     }
 }

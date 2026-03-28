@@ -34,6 +34,21 @@ pub enum CandidateEvent {
 }
 pub type CandidateCallback = Box<dyn Fn(CandidateEvent)>;
 
+/// Configuration for candidate list display
+#[derive(Clone)]
+pub struct CandidateConfig {
+    /// Maximum number of candidates to display per page
+    pub max_candidates: usize,
+}
+
+impl Default for CandidateConfig {
+    fn default() -> Self {
+        Self {
+            max_candidates: 9,
+        }
+    }
+}
+
 pub struct InputSource {
     /// The unique identifier for the input source.
     pub name: String,
@@ -82,6 +97,11 @@ pub trait InputContext {
     fn set_candidate_callback(&mut self, callback: CandidateCallback);
     fn set_input_source_callback(&mut self, callback: InputSourceCallback);
     fn set_input_mode_callback(&mut self, callback: InputModeCallback);
+
+    /// Get candidate list configuration
+    fn get_candidate_config(&self) -> CandidateConfig;
+    /// Set candidate list configuration
+    fn set_candidate_config(&mut self, config: CandidateConfig);
 }
 
 /// Version string for the library
