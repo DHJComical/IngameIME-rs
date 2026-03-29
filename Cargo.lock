@@ -1197,6 +1197,7 @@ version = "0.1.0"
 dependencies = [
  "jni",
  "windows",
+ "windows-core",
 ]
 
 [[package]]
