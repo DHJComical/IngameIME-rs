@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::char::decode_utf16;
+use std::ffi::c_void;
 use std::sync::atomic::AtomicU32;
 
 use windows::{
@@ -15,9 +16,16 @@ use windows::{
     Win32::Foundation::*,
     Win32::Graphics::Gdi::MapWindowPoints,
     Win32::System::Com::*,
+    Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
     Win32::UI::TextServices::*,
     Win32::UI::WindowsAndMessaging::GetWindowRect,
 };
+
+// Import FreeLibrary from Windows API
+#[cfg(windows)]
+unsafe extern "system" {
+    fn FreeLibrary(hlibmodule: HMODULE) -> BOOL;
+}
 
 // IID constants for TSF interfaces
 const IID_ITfTextEditSink: GUID = GUID::from_u128(0x0491dd00_1172_4b71_84aa_8f4b3aeb517b);
@@ -28,6 +36,9 @@ const IID_ITfContextOwner: GUID = GUID::from_u128(0x96eb9ce0_90e0_4c39_87c0_6e4d
 
 // TSF constants
 const TF_INVALID_UIELEMENTID: u32 = 0xffffffff;
+
+// TF_CreateThreadMgr function pointer type
+type TfCreateThreadMgr = unsafe extern "system" fn(*mut *mut c_void) -> HRESULT;
 
 use crate::interface::lib::{
     Candidate, CandidateCallback, CandidateConfig, CandidateEvent, CommitCallback, InputContext,
@@ -566,17 +577,47 @@ impl TsInputContext {
         unsafe {
             let hwnd = HWND(hwnd as *mut _);
 
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            // Initialize COM with COINIT_APARTMENTTHREADED for STA
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            // RPC_E_CHANGED_MODE (0x80010106 = -2147417850) is OK, means COM already initialized
+            if !hr.is_ok() && hr.0 != -2147417850 {
+                log_error(&format!("Failed to initialize COM: 0x{:08X}", hr.0 as u32));
+                return None;
+            }
 
+            // Load msctf.dll explicitly (required for Win11 compatibility)
+            log_debug("Loading msctf.dll");
+            let h_msctf = LoadLibraryW(w!("msctf.dll"));
+            if h_msctf.is_err() {
+                log_error("Failed to load msctf.dll");
+                return None;
+            }
+            let h_msctf = h_msctf.unwrap();
+
+            // Get TF_CreateThreadMgr function
+            log_debug("Getting TF_CreateThreadMgr function");
+            let proc_addr = GetProcAddress(h_msctf, windows::core::PCSTR("TF_CreateThreadMgr\0".as_ptr()));
+            if proc_addr.is_none() {
+                log_error("Failed to get TF_CreateThreadMgr function address");
+                let _ = FreeLibrary(h_msctf);
+                return None;
+            }
+            let create_thread_mgr: TfCreateThreadMgr = std::mem::transmute(proc_addr.unwrap());
+
+            // Create thread manager using TF_CreateThreadMgr
             log_debug("Creating thread manager");
-            let thread_mgr: ITfThreadMgr = match CoCreateInstance(&IID_ITfThreadMgr, None, CLSCTX_INPROC_SERVER) {
-                Ok(mgr) => mgr,
-                Err(e) => {
-                    log_error(&format!("Failed to create thread manager: {}", e));
-                    return None;
-                }
-            };
+            let mut thread_mgr_ptr: *mut c_void = std::ptr::null_mut();
+            let hr = create_thread_mgr(&mut thread_mgr_ptr);
+            if hr.is_err() || thread_mgr_ptr.is_null() {
+                log_error(&format!("Failed to create thread manager: {}", hr));
+                let _ = FreeLibrary(h_msctf);
+                return None;
+            }
 
+            // Use from_raw for safe conversion
+            let thread_mgr: ITfThreadMgr = windows::core::Interface::from_raw(thread_mgr_ptr);
+
+            // Get ITfThreadMgrEx for activation
             log_debug("Activating thread manager");
             let thread_mgr_ex: ITfThreadMgrEx = match thread_mgr.cast() {
                 Ok(ex) => ex,
@@ -586,12 +627,18 @@ impl TsInputContext {
                 }
             };
 
+            // Activate thread manager
             let mut client_id = 0u32;
             let hr = if ui_less {
                 thread_mgr_ex.ActivateEx(&mut client_id, TF_TMAE_UIELEMENTENABLEDONLY)
             } else {
-                client_id = thread_mgr_ex.Activate().unwrap_or(0);
-                Ok(())
+                match thread_mgr_ex.Activate() {
+                    Ok(id) => {
+                        client_id = id;
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
             };
 
             if hr.is_err() {
@@ -651,32 +698,35 @@ impl TsInputContext {
 
             log_debug("Creating context");
             if let Some(ref doc_mgr) = doc_mgr {
+                // Create context with CompositionHandler as sink
                 let comp_sink: ITfContextOwnerCompositionSink = (&(*inner_ptr).composition_handler).cast().ok()?;
                 let mut edit_cookie = 0u32;
+                
                 if let Err(e) = doc_mgr.CreateContext(client_id, 0, &comp_sink, &mut (*inner_ptr).ctx, &mut edit_cookie) {
                     log_error(&format!("Failed to create context: {}", e));
                     return None;
                 }
 
+                // Push context to document manager FIRST (required for Win11)
+                if let Some(ref ctx) = (*inner_ptr).ctx {
+                    if let Err(e) = doc_mgr.Push(ctx) {
+                        log_error(&format!("Failed to push context: {}", e));
+                        return None;
+                    }
+                }
+
+                // Then initialize handlers
                 if let Some(ref ctx) = (*inner_ptr).ctx {
                     if let Err(e) = (&(*inner_ptr).composition_handler).initialize(ctx, client_id) {
                         log_warn(&format!("Failed to initialize composition handler: {}", e));
                     }
 
-                    // 注册 ContextOwner sink
+                    // Register ITfContextOwner using ITfSource::AdviseSink
                     let owner: ITfContextOwner = (&(*inner_ptr).context_owner).cast().ok()?;
-                    if let Ok(source) = ctx.cast::<ITfSource>() {
-                        let unknown: IUnknown = owner.cast().ok()?;
-                        if let Err(e) = source.AdviseSink(&IID_ITfContextOwner, &unknown) {
-                            log_warn(&format!("Failed to advise context owner sink: {}", e));
-                        }
-                    }
-                }
-
-                if let Some(ref ctx) = (*inner_ptr).ctx {
-                    if let Err(e) = doc_mgr.Push(ctx) {
-                        log_error(&format!("Failed to push context: {}", e));
-                        return None;
+                    let source: ITfSource = ctx.cast().ok()?;
+                    let unknown: IUnknown = owner.cast().ok()?;
+                    if let Err(e) = source.AdviseSink(&IID_ITfContextOwner, &unknown) {
+                        log_warn(&format!("Failed to advise context owner sink: {}", e));
                     }
                 }
             }

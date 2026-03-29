@@ -9,10 +9,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # JNI - use 0.21.x for stable API
 jni = "0.21.1"
-windows-core = "0.58"
 
 # windows
 [target.'cfg(windows)'.dependencies]
+windows-core = "0.58"
 windows = { version = "0.58", features = [
     "implement",
     "Win32_Foundation",
@@ -23,5 +23,5 @@ windows = { version = "0.58", features = [
     "Win32_System_Ole",
     "Win32_UI_TextServices",
     "Win32_Globalization",
+    "Win32_System_LibraryLoader"
 ] }
-windows-core = "0.58"

@@ -155,40 +155,49 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
     let is_ui_less: bool = ui_less != JNI_FALSE;
 
-    let ctx: Option<Box<dyn crate::interface::lib::InputContext>> = match api {
-        0 => {
-            log_info(&format!(
-                "Creating TSF InputContext (ui_less={})",
-                is_ui_less
-            ));
-            #[cfg(windows)]
-            {
-                crate::interface::tsf::TsInputContext::new(hwnd as isize, is_ui_less)
-            }
-            #[cfg(not(windows))]
-            {
-                None
-            }
+    // Try requested API first, then fallback to IMM32 if failed
+    let mut ctx: Option<Box<dyn crate::interface::lib::InputContext>> = None;
+    let mut tried_imm32 = false;
+
+    if api == 0 {
+        // Try TSF first
+        log_info(&format!(
+            "Creating TSF InputContext (ui_less={})",
+            is_ui_less
+        ));
+        #[cfg(windows)]
+        {
+            ctx = crate::interface::tsf::TsInputContext::new(hwnd as isize, is_ui_less);
         }
-        1 => {
+        
+        // If TSF failed, fallback to IMM32
+        if ctx.is_none() {
+            log_info("TSF initialization failed, falling back to IMM32...");
+            tried_imm32 = true;
+        }
+    }
+
+    // Use IMM32 if requested or if TSF failed
+    if ctx.is_none() {
+        if tried_imm32 || api == 1 {
             log_info(&format!(
                 "Creating IMM32 InputContext (ui_less={})",
                 is_ui_less
             ));
             #[cfg(windows)]
             {
-                crate::interface::imm32::Imm32InputContext::new(hwnd_nz, is_ui_less)
+                ctx = crate::interface::imm32::Imm32InputContext::new(hwnd_nz, is_ui_less);
             }
             #[cfg(not(windows))]
             {
-                None
+                ctx = None;
             }
         }
-        _ => {
-            log_info(&format!("ERROR: Unknown API type: {}", api));
-            None
-        }
-    };
+    }
+
+    if ctx.is_none() {
+        log_info(&format!("ERROR: Failed to create InputContext for API {}", api));
+    }
 
     match ctx {
         Some(c) => {
