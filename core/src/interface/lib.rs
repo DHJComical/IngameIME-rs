@@ -67,6 +67,7 @@ pub enum InputSourceInfo {
 }
 pub type InputSourceCallback = Box<dyn Fn(InputSourceInfo)>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     /// Input mode info is not supported.
     Unsupported,

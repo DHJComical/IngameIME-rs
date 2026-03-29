@@ -226,7 +226,7 @@ impl Imm32InputContext {
 
                 log_debug("Save userdata for WNDPROC");
                 let ptr = &*context as *const Imm32InputContext as _;
-                match SetPropW(hwnd, w!("IngameIME_Userdata"), Some(HANDLE(ptr))) {
+                match SetPropW(hwnd, w!("IngameIME_Userdata"), HANDLE(ptr)) {
                     Ok(_) => {
                         log_debug("Config OpenStatus");
                         if (!ImmSetOpenStatus(himc, true)).into() {
@@ -237,7 +237,7 @@ impl Imm32InputContext {
                         Some(context)
                     }
                     Err(e) => {
-                        log_error("Unable to SetPropW for IngameIME_Userdata: {e}");
+                        log_error(&format!("Unable to SetPropW for IngameIME_Userdata: {}", e));
                         None
                     }
                 }
@@ -519,9 +519,9 @@ impl Drop for Imm32InputContext {
             // restore previous wndproc
             SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, std::mem::transmute(self.proc));
             // clear pointer which will be invalid
-            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Some(HANDLE::default()))
+            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), HANDLE::default())
                 .inspect_err(|e| {
-                    log_error("Unable to SetPropW for IngameIME_Userdata: {e}");
+                    log_error(&format!("Unable to SetPropW for IngameIME_Userdata: {}", e));
                 });
             // restore previous himc
             ImmAssociateContext(self.hwnd, self.prev);

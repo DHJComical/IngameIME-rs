@@ -156,6 +156,20 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
     let is_ui_less: bool = ui_less != JNI_FALSE;
 
     let ctx: Option<Box<dyn crate::interface::lib::InputContext>> = match api {
+        0 => {
+            log_info(&format!(
+                "Creating TSF InputContext (ui_less={})",
+                is_ui_less
+            ));
+            #[cfg(windows)]
+            {
+                crate::interface::tsf::TsInputContext::new(hwnd as isize, is_ui_less)
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        }
         1 => {
             log_info(&format!(
                 "Creating IMM32 InputContext (ui_less={})",
