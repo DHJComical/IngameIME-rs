@@ -59,120 +59,117 @@ unsafe extern "system" fn ingame_ime_proc(
         let context = &*(handle.0 as *const Imm32InputContext);
 
         match msg {
-                WM_INPUTLANGCHANGEREQUEST => {
-                    log_debug("WM_INPUTLANGCHANGEREQUEST");
-                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+            WM_INPUTLANGCHANGEREQUEST => {
+                log_debug("WM_INPUTLANGCHANGEREQUEST");
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_INPUTLANGCHANGE => {
+                log_debug("WM_INPUTLANGCHANGE");
+                // notify input source change
+                if let Some(cb) = &context.input_source_cb {
+                    cb(context.get_input_source());
                 }
-                WM_INPUTLANGCHANGE => {
-                    log_debug("WM_INPUTLANGCHANGE");
-                    // notify input source change
-                    if let Some(cb) = &context.input_source_cb {
-                        cb(context.get_input_source());
+                // notify input mode change
+                if let Some(cb) = &context.input_mode_cb {
+                    cb(context.get_input_mode());
+                }
+                LRESULT(1)
+            }
+            WM_IME_SETCONTEXT => {
+                log_debug("WM_SETCONTEXT");
+                let mut lparam = lparam.0;
+                lparam &= !ISC_SHOWUICOMPOSITIONWINDOW as isize;
+                if context.ui_less {
+                    lparam &= !ISC_SHOWUICANDIDATEWINDOW as isize;
+                }
+                DefWindowProcW(hwnd, msg, wparam, LPARAM(lparam))
+            }
+            WM_IME_STARTCOMPOSITION => {
+                log_debug("WM_IME_STARTCOMPOSITION");
+                // preedit event: begin
+                if let Some(cb) = &context.preedit_cb {
+                    cb(PreEditEvent::Begin);
+                }
+                // Also fetch candidate list for new composition
+                if context.ui_less {
+                    context.run_candidate_update();
+                }
+                LRESULT(1)
+            }
+            WM_IME_COMPOSITION => {
+                log_debug("WM_IME_COMPOSITION");
+                // preedit event: update
+                if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_COMPSTR | GCS_CURSORPOS) {
+                    context.run_preedit_update();
+                }
+                // notify commit string
+                if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_RESULTSTR) {
+                    context.run_commit();
+                }
+                // Also fetch candidate list on composition update
+                if context.ui_less {
+                    context.run_candidate_update();
+                }
+                LRESULT(1)
+            }
+            WM_IME_ENDCOMPOSITION => {
+                log_debug("WM_IME_ENDCOMPOSITION");
+                // preedit event: end
+                if let Some(cb) = &context.preedit_cb {
+                    cb(PreEditEvent::End);
+                }
+                // Don't send CandidateEvent::End here as it would clear the candidate list
+                // when user selects a character and continues typing (e.g., "shenren" -> "神" -> "ren")
+                // The candidate list will be updated when new composition starts
+                LRESULT(1)
+            }
+            WM_IME_NOTIFY => match wparam.0 as u32 {
+                IMN_OPENCANDIDATE => {
+                    log_debug("IMN_OPENCANDIDATE");
+                    // Don't send Begin event as it would clear the candidate list
+                    // Candidate list will be fetched on IMN_CHANGECANDIDATE
+                    LRESULT(1)
+                }
+                IMN_CHANGECANDIDATE => {
+                    log_debug("IMN_CHANGECANDIDATE");
+                    if context.ui_less {
+                        context.run_candidate_update();
                     }
+                    LRESULT(1)
+                }
+                IMN_CLOSECANDIDATE => {
+                    log_debug("IMN_CLOSECANDIDATE");
+                    if context.ui_less {
+                        if let Some(cb) = &context.candidate_cb {
+                            cb(CandidateEvent::End);
+                        }
+                    }
+                    LRESULT(1)
+                }
+                IMN_SETCONVERSIONMODE => {
+                    log_debug("IMN_SETCONVERSIONMODE");
                     // notify input mode change
                     if let Some(cb) = &context.input_mode_cb {
                         cb(context.get_input_mode());
                     }
-                    return LRESULT(1);
+                    LRESULT(1)
                 }
-                WM_IME_SETCONTEXT => {
-                    log_debug("WM_SETCONTEXT");
-                    let mut lparam = lparam.0;
-                    lparam &= !ISC_SHOWUICOMPOSITIONWINDOW as isize;
-                    if context.ui_less {
-                        lparam &= !ISC_SHOWUICANDIDATEWINDOW as isize;
-                    }
-                    return DefWindowProcW(hwnd, msg, wparam, LPARAM(lparam));
-                }
-                WM_IME_STARTCOMPOSITION => {
-                    log_debug("WM_IME_STARTCOMPOSITION");
-                    // preedit event: begin
-                    if let Some(cb) = &context.preedit_cb {
-                        cb(PreEditEvent::Begin);
-                    }
-                    // Also fetch candidate list for new composition
-                    if context.ui_less {
-                        context.run_candidate_update();
-                    }
-                    return LRESULT(1);
-                }
-                WM_IME_COMPOSITION => {
-                    log_debug("WM_IME_COMPOSITION");
-                    // preedit event: update
-                    if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_COMPSTR | GCS_CURSORPOS)
-                    {
-                        context.run_preedit_update();
-                    }
-                    // notify commit string
-                    if IME_COMPOSITION_STRING(lparam.0 as u32).contains(GCS_RESULTSTR) {
-                        context.run_commit();
-                    }
-                    // Also fetch candidate list on composition update
-                    if context.ui_less {
-                        context.run_candidate_update();
-                    }
-                    return LRESULT(1);
-                }
-                WM_IME_ENDCOMPOSITION => {
-                    log_debug("WM_IME_ENDCOMPOSITION");
-                    // preedit event: end
-                    if let Some(cb) = &context.preedit_cb {
-                        cb(PreEditEvent::End);
-                    }
-                    // Don't send CandidateEvent::End here as it would clear the candidate list
-                    // when user selects a character and continues typing (e.g., "shenren" -> "神" -> "ren")
-                    // The candidate list will be updated when new composition starts
-                    return LRESULT(1);
-                }
-                WM_IME_NOTIFY => match wparam.0 as u32 {
-                    IMN_OPENCANDIDATE => {
-                        log_debug("IMN_OPENCANDIDATE");
-                        // Don't send Begin event as it would clear the candidate list
-                        // Candidate list will be fetched on IMN_CHANGECANDIDATE
-                        return LRESULT(1);
-                    }
-                    IMN_CHANGECANDIDATE => {
-                        log_debug("IMN_CHANGECANDIDATE");
-                        if context.ui_less {
-                            context.run_candidate_update();
-                        }
-                        return LRESULT(1);
-                    }
-                    IMN_CLOSECANDIDATE => {
-                        log_debug("IMN_CLOSECANDIDATE");
-                        if context.ui_less {
-                            if let Some(cb) = &context.candidate_cb {
-                                cb(CandidateEvent::End);
-                            }
-                        }
-                        return LRESULT(1);
-                    }
-                    IMN_SETCONVERSIONMODE => {
-                        log_debug("IMN_SETCONVERSIONMODE");
-                        // notify input mode change
-                        if let Some(cb) = &context.input_mode_cb {
-                            cb(context.get_input_mode());
-                        }
-                        return LRESULT(1);
-                    }
-                    _ => {
-                        return DefWindowProcW(hwnd, msg, wparam, lparam);
-                    }
-                },
-                WM_IME_CHAR => {
-                    log_debug("WM_IME_CHAR");
-                    // commit already handled in WM_IME_COMPOSITION, prevent from multiple conversion
-                    return LRESULT(1);
-                }
-                // default
-                _ => {
-                    if let Some(proc) = context.proc {
-                        return CallWindowProcW(proc, hwnd, msg, wparam, lparam);
-                    } else {
-                        return DefWindowProcW(hwnd, msg, wparam, lparam);
-                    }
+                _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+            },
+            WM_IME_CHAR => {
+                log_debug("WM_IME_CHAR");
+                // commit already handled in WM_IME_COMPOSITION, prevent from multiple conversion
+                LRESULT(1)
+            }
+            // default
+            _ => {
+                if let Some(proc) = context.proc {
+                    CallWindowProcW(proc, hwnd, msg, wparam, lparam)
+                } else {
+                    DefWindowProcW(hwnd, msg, wparam, lparam)
                 }
             }
+        }
     }
 }
 
@@ -239,7 +236,12 @@ impl Imm32InputContext {
                             log_error("Unable to SetOpenStatus");
                             // Restore original WNDPROC
                             SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc_ptr);
-                            SetPropW(hwnd, w!("IngameIME_Userdata"), Option::from(HANDLE::default())).ok();
+                            SetPropW(
+                                hwnd,
+                                w!("IngameIME_Userdata"),
+                                Option::from(HANDLE::default()),
+                            )
+                            .ok();
                             return None;
                         }
                         log_info("Imm32InputContext created");
@@ -313,10 +315,10 @@ impl Imm32InputContext {
     fn run_candidate_update(&self) {
         unsafe {
             let size = ImmGetCandidateListW(self.himc, 0, None, 0);
-            
+
             let mut candidates = Vec::<String>::new();
             let mut selected: usize = 0;
-            
+
             if size > 0 {
                 log_debug("Get Candidates");
                 let mut buffer = Vec::<u8>::with_capacity(size as usize);
@@ -382,7 +384,7 @@ impl Imm32InputContext {
                 } else {
                     0
                 };
-                
+
                 candidates = candidates_vec;
             } else {
                 log_debug("No candidates available (size=0)");
@@ -531,10 +533,14 @@ impl Drop for Imm32InputContext {
                 SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, proc_ptr);
             }
             // clear pointer which will be invalid
-            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Option::from(HANDLE::default()))
-                .inspect_err(|e| {
-                    log_error(&format!("Unable to SetPropW for IngameIME_Userdata: {}", e));
-                });
+            let _ = SetPropW(
+                self.hwnd,
+                w!("IngameIME_Userdata"),
+                Option::from(HANDLE::default()),
+            )
+            .inspect_err(|e| {
+                log_error(&format!("Unable to SetPropW for IngameIME_Userdata: {}", e));
+            });
             // restore previous himc
             ImmAssociateContext(self.hwnd, self.prev);
             // destroy context

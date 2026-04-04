@@ -1,8 +1,8 @@
 //! Logger bridge that forwards Rust logs to Java's Log4j via JNI.
 
+use jni::jni_str;
 use jni::objects::{Global, JObject, JValue};
 use jni::{jni_sig, JavaVM};
-use jni::jni_str;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static mut JAVA_VM: Option<JavaVM> = None;
@@ -64,7 +64,7 @@ fn log_to_java_logger(level: &str, message: &str) {
         };
 
         let formatted = format!("[IngameIME-Rust] {}", message);
-        
+
         let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
             if let Ok(jmsg) = env.new_string(&formatted) {
                 let method = match level {

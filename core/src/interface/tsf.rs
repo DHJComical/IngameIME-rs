@@ -124,18 +124,32 @@ impl ContextOwner {
 
 impl ITfContextOwner_Impl for ContextOwner_Impl {
     fn GetACPFromPoint(&self, _ptscreen: *const POINT, _dwflags: u32) -> Result<i32> {
-        Err(Error::from_hresult(HRESULT::from_win32(ERROR_NOT_SUPPORTED.0)))
+        Err(Error::from_hresult(HRESULT::from_win32(
+            ERROR_NOT_SUPPORTED.0,
+        )))
     }
 
-    fn GetTextExt(&self, _acpstart: i32, _acpend: i32, prc: *mut RECT, pfclipped: *mut BOOL) -> Result<()> {
+    fn GetTextExt(
+        &self,
+        _acpstart: i32,
+        _acpend: i32,
+        prc: *mut RECT,
+        pfclipped: *mut BOOL,
+    ) -> Result<()> {
         unsafe {
             if prc.is_null() {
-                return Err(Error::from_hresult(HRESULT::from_win32(ERROR_INVALID_PARAMETER.0)));
+                return Err(Error::from_hresult(HRESULT::from_win32(
+                    ERROR_INVALID_PARAMETER.0,
+                )));
             }
             *prc = self.get_rect().to_rect();
             // Map window coordinates to screen coordinates
             let hwnd = self.get_hwnd();
-            let _ = MapWindowPoints(Some(hwnd), None, core::slice::from_raw_parts_mut(prc as *mut POINT, 2));
+            let _ = MapWindowPoints(
+                Some(hwnd),
+                None,
+                core::slice::from_raw_parts_mut(prc as *mut POINT, 2),
+            );
             if !pfclipped.is_null() {
                 *pfclipped = BOOL(0);
             }
@@ -171,7 +185,12 @@ impl ITfContextOwner_Impl for ContextOwner_Impl {
 // CompositionHandler - Implements ITfContextOwnerCompositionSink, ITfTextEditSink, ITfUIElementSink, ITfEditSession
 // ============================================================================
 
-#[implement(ITfContextOwnerCompositionSink, ITfTextEditSink, ITfUIElementSink, ITfEditSession)]
+#[implement(
+    ITfContextOwnerCompositionSink,
+    ITfTextEditSink,
+    ITfUIElementSink,
+    ITfEditSession
+)]
 pub struct CompositionHandler {
     input_ctx: *mut TsInputContextInner,
     comp_view: RefCell<Option<ITfCompositionView>>,
@@ -202,7 +221,8 @@ impl CompositionHandler {
             let inner = &*self.input_ctx;
 
             if inner.ui_less {
-                if let Ok(thread_mgr) = inner.thread_mgr.as_ref().unwrap().cast::<ITfUIElementMgr>() {
+                if let Ok(thread_mgr) = inner.thread_mgr.as_ref().unwrap().cast::<ITfUIElementMgr>()
+                {
                     let source: ITfSource = thread_mgr.cast()?;
                     // Get IUnknown from our ComObject
                     let unknown: IUnknown = inner.composition_handler.to_interface();
@@ -226,7 +246,12 @@ impl CompositionHandler {
         unsafe {
             let cookie_ele = *self.cookie_ele.borrow();
             if cookie_ele != TF_INVALID_COOKIE {
-                if let Some(source) = self.ele_mgr.borrow().as_ref().and_then(|m| m.cast::<ITfSource>().ok()) {
+                if let Some(source) = self
+                    .ele_mgr
+                    .borrow()
+                    .as_ref()
+                    .and_then(|m| m.cast::<ITfSource>().ok())
+                {
                     let _ = source.UnadviseSink(cookie_ele);
                 }
                 *self.cookie_ele.borrow_mut() = TF_INVALID_COOKIE;
@@ -285,7 +310,10 @@ impl CompositionHandler {
     fn run_candidate_update(&self, candidates: Vec<String>, selected: usize) {
         unsafe {
             if let Some(cb) = &(*self.input_ctx).candidate_cb {
-                cb(CandidateEvent::Update(Candidate { candidates, selected }));
+                cb(CandidateEvent::Update(Candidate {
+                    candidates,
+                    selected,
+                }));
             }
         }
     }
@@ -300,43 +328,50 @@ impl CompositionHandler {
 }
 
 impl ITfContextOwnerCompositionSink_Impl for CompositionHandler_Impl {
-    fn OnStartComposition(&self, pcomposition: windows_core::Ref<ITfCompositionView>) -> Result<BOOL> {
+    fn OnStartComposition(&self, pcomposition: Ref<ITfCompositionView>) -> Result<BOOL> {
         log_debug("OnStartComposition");
-        unsafe {
-            if let Some(comp_view) = pcomposition.as_ref() {
-                *self.comp_view.borrow_mut() = Some(comp_view.clone());
-                log_debug("OnStartComposition: stored comp_view");
-            } else {
-                log_debug("OnStartComposition: pcomposition is null");
-            }
+        if let Some(comp_view) = pcomposition.as_ref() {
+            *self.comp_view.borrow_mut() = Some(comp_view.clone());
+            log_debug("OnStartComposition: stored comp_view");
+        } else {
+            log_debug("OnStartComposition: pcomposition is null");
         }
         self.run_preedit_begin();
         Ok(BOOL(1))
     }
 
-    fn OnUpdateComposition(&self, pcomposition: windows_core::Ref<ITfCompositionView>, _prangenew: windows_core::Ref<ITfRange>) -> Result<()> {
+    fn OnUpdateComposition(
+        &self,
+        pcomposition: Ref<ITfCompositionView>,
+        _prangenew: Ref<ITfRange>,
+    ) -> Result<()> {
         log_debug("OnUpdateComposition");
-        unsafe {
-            if let Some(comp_view) = pcomposition.as_ref() {
-                *self.comp_view.borrow_mut() = Some(comp_view.clone());
-                log_debug("OnUpdateComposition: updated comp_view");
-            } else {
-                log_debug("OnUpdateComposition: pcomposition is null");
-            }
+        if let Some(comp_view) = pcomposition.as_ref() {
+            *self.comp_view.borrow_mut() = Some(comp_view.clone());
+            log_debug("OnUpdateComposition: updated comp_view");
+        } else {
+            log_debug("OnUpdateComposition: pcomposition is null");
         }
         Ok(())
     }
 
-    fn OnEndComposition(&self, _pcomposition: windows_core::Ref<ITfCompositionView>) -> Result<()> {
+    fn OnEndComposition(&self, _pcomposition: Ref<ITfCompositionView>) -> Result<()> {
         log_debug("OnEndComposition");
         unsafe {
             let inner = &*self.input_ctx;
             if let Some(ref ctx) = inner.ctx {
                 // Request edit session to process commit text
                 let edit_session: ITfEditSession = self.to_interface();
-                let req_result = ctx.RequestEditSession(inner.client_id, &edit_session, TF_ES_ASYNC | TF_ES_READWRITE);
+                let req_result = ctx.RequestEditSession(
+                    inner.client_id,
+                    &edit_session,
+                    TF_ES_ASYNC | TF_ES_READWRITE,
+                );
                 if let Err(e) = req_result {
-                    log_debug(&format!("OnEndComposition: RequestEditSession failed: {:?}", e));
+                    log_debug(&format!(
+                        "OnEndComposition: RequestEditSession failed: {:?}",
+                        e
+                    ));
                 } else {
                     log_debug("OnEndComposition: RequestEditSession called");
                 }
@@ -358,11 +393,12 @@ impl ITfEditSession_Impl for CompositionHandler_Impl {
                 // Get full range of the context
                 let full_range_result = ctx.GetStart(ec);
                 let range_at_end_result = ctx.GetEnd(ec);
-                
-                if let (Ok(full_range), Ok(range_at_end)) = (full_range_result, range_at_end_result) {
+
+                if let (Ok(full_range), Ok(range_at_end)) = (full_range_result, range_at_end_result)
+                {
                     // Extend full range to cover all text
                     let _ = full_range.ShiftEndToRange(ec, &range_at_end, TF_ANCHOR_END);
-                    
+
                     // Check if context is empty
                     let is_empty_result = full_range.IsEmpty(ec);
                     if let Ok(is_empty) = is_empty_result {
@@ -372,15 +408,22 @@ impl ITfEditSession_Impl for CompositionHandler_Impl {
                             // Get text length
                             if let Ok(range_acp) = full_range.cast::<ITfRangeACP>() {
                                 let (mut acp_start, mut len) = (0i32, 0i32);
-                                if range_acp.GetExtent(&mut acp_start, &mut len).is_ok() && len > 0 {
+                                if range_acp.GetExtent(&mut acp_start, &mut len).is_ok() && len > 0
+                                {
                                     // Get commit text
                                     let mut buf = vec![0u16; len as usize];
                                     let mut fetched = 0u32;
-                                    if full_range.GetText(ec, 0, &mut buf, &mut fetched).is_ok() && fetched > 0 {
-                                        let text: String = decode_utf16(buf[..fetched as usize].iter().copied())
-                                            .map(|r| r.unwrap_or('\u{FFFD}'))
-                                            .collect();
-                                        log_debug(&format!("DoEditSession: commit text='{}'", text));
+                                    if full_range.GetText(ec, 0, &mut buf, &mut fetched).is_ok()
+                                        && fetched > 0
+                                    {
+                                        let text: String =
+                                            decode_utf16(buf[..fetched as usize].iter().copied())
+                                                .map(|r| r.unwrap_or('\u{FFFD}'))
+                                                .collect();
+                                        log_debug(&format!(
+                                            "DoEditSession: commit text='{}'",
+                                            text
+                                        ));
                                         // Clear the text from context
                                         let _ = full_range.SetText(ec, 0, &[]);
                                         // Call commit callback
@@ -392,7 +435,10 @@ impl ITfEditSession_Impl for CompositionHandler_Impl {
                             }
                         }
                     } else {
-                        log_debug(&format!("DoEditSession: IsEmpty failed: {:?}", is_empty_result));
+                        log_debug(&format!(
+                            "DoEditSession: IsEmpty failed: {:?}",
+                            is_empty_result
+                        ));
                     }
                 }
             }
@@ -402,7 +448,12 @@ impl ITfEditSession_Impl for CompositionHandler_Impl {
 }
 
 impl ITfTextEditSink_Impl for CompositionHandler_Impl {
-    fn OnEndEdit(&self, pic: windows_core::Ref<ITfContext>, ec: u32, _peditrecord: windows_core::Ref<ITfEditRecord>) -> Result<()> {
+    fn OnEndEdit(
+        &self,
+        pic: Ref<ITfContext>,
+        ec: u32,
+        _peditrecord: Ref<ITfEditRecord>,
+    ) -> Result<()> {
         log_debug("OnEndEdit");
         unsafe {
             let comp_view = self.comp_view.borrow();
@@ -416,14 +467,20 @@ impl ITfTextEditSink_Impl for CompositionHandler_Impl {
                 if let Ok(range_acp) = range.cast::<ITfRangeACP>() {
                     let (mut acp_start, mut len) = (0i32, 0i32);
                     let extent_result = range_acp.GetExtent(&mut acp_start, &mut len);
-                    log_debug(&format!("GetExtent: start={}, len={}, result={:?}", acp_start, len, extent_result));
-                    
+                    log_debug(&format!(
+                        "GetExtent: start={}, len={}, result={:?}",
+                        acp_start, len, extent_result
+                    ));
+
                     if extent_result.is_ok() && len > 0 {
                         let mut buf = vec![0u16; len as usize];
                         let mut fetched = 0u32;
                         let text_result = range.GetText(ec, 0, &mut buf, &mut fetched);
-                        log_debug(&format!("GetText: fetched={}, result={:?}", fetched, text_result));
-                        
+                        log_debug(&format!(
+                            "GetText: fetched={}, result={:?}",
+                            fetched, text_result
+                        ));
+
                         if text_result.is_ok() && fetched > 0 {
                             let actual_len = fetched as usize;
                             let text: String = decode_utf16(buf[..actual_len].iter().copied())
@@ -432,7 +489,10 @@ impl ITfTextEditSink_Impl for CompositionHandler_Impl {
                             log_debug(&format!("PreEdit text: '{}'", text));
                             self.run_preedit_update(text, acp_start as usize);
                         } else {
-                            log_debug(&format!("GetText failed or empty: result={:?}, fetched={}", text_result, fetched));
+                            log_debug(&format!(
+                                "GetText failed or empty: result={:?}, fetched={}",
+                                text_result, fetched
+                            ));
                         }
                     } else {
                         log_debug("GetExtent failed or len == 0");
@@ -453,7 +513,9 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
         log_debug(&format!("BeginUIElement: {}", dwuielementid));
         unsafe {
             if pbshow.is_null() {
-                return Err(Error::from_hresult(HRESULT::from_win32(ERROR_INVALID_PARAMETER.0)));
+                return Err(Error::from_hresult(HRESULT::from_win32(
+                    ERROR_INVALID_PARAMETER.0,
+                )));
             }
             *pbshow = BOOL(0);
 
@@ -482,14 +544,17 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
         unsafe {
             let ele_id = *self.ele_id.borrow();
             if ele_id == TF_INVALID_UIELEMENTID || dwuielementid != ele_id {
-                log_debug(&format!("UpdateUIElement: element id mismatch, expected {}, got {}", ele_id, dwuielementid));
+                log_debug(&format!(
+                    "UpdateUIElement: element id mismatch, expected {}, got {}",
+                    ele_id, dwuielementid
+                ));
                 return Ok(());
             }
 
             if let Some(ref ele) = *self.ele.borrow() {
                 if let Ok(cand_ele) = ele.cast::<ITfCandidateListUIElement>() {
                     log_debug("UpdateUIElement: cast to ITfCandidateListUIElement succeeded");
-                    
+
                     let count = match cand_ele.GetCount() {
                         Ok(c) => c,
                         Err(e) => {
@@ -498,32 +563,37 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                         }
                     };
                     log_debug(&format!("UpdateUIElement: candidate count={}", count));
-                    
+
                     // Get page count using raw vtable call with NULL pointer
                     let mut page_count: u32 = 0;
-                    unsafe {
-                        let vtable = cand_ele.vtable();
-                        let hr = (vtable.GetPageIndex)(
-                            std::mem::transmute_copy(&cand_ele),
-                            std::ptr::null_mut(),
-                            0,
-                            &mut page_count,
-                        );
-                        if hr.is_ok() {
-                            log_debug(&format!("UpdateUIElement: page_count={}", page_count));
-                        } else {
-                            log_debug(&format!("UpdateUIElement: GetPageIndex(page_count) failed: {:?}", hr));
-                            page_count = 1;
-                        }
+                    let vtable = cand_ele.vtable();
+                    let hr = (vtable.GetPageIndex)(
+                        std::mem::transmute_copy(&cand_ele),
+                        std::ptr::null_mut(),
+                        0,
+                        &mut page_count,
+                    );
+                    if hr.is_ok() {
+                        log_debug(&format!("UpdateUIElement: page_count={}", page_count));
+                    } else {
+                        log_debug(&format!(
+                            "UpdateUIElement: GetPageIndex(page_count) failed: {:?}",
+                            hr
+                        ));
+                        page_count = 1;
                     }
 
                     let mut page_starts = vec![0u32; page_count as usize];
                     let mut actual_page_count = page_count;
-                    if let Ok(()) = cand_ele.GetPageIndex(&mut page_starts, &mut actual_page_count) {
-                        log_debug(&format!("UpdateUIElement: page_starts={:?}", &page_starts[..actual_page_count as usize]));
+                    if let Ok(()) = cand_ele.GetPageIndex(&mut page_starts, &mut actual_page_count)
+                    {
+                        log_debug(&format!(
+                            "UpdateUIElement: page_starts={:?}",
+                            &page_starts[..actual_page_count as usize]
+                        ));
                         page_count = actual_page_count;
                     } else {
-                        log_debug(&format!("UpdateUIElement: GetPageIndex(page_starts) failed"));
+                        log_debug(&"UpdateUIElement: GetPageIndex(page_starts) failed".to_string());
                         page_starts = vec![0];
                         page_count = 1;
                     }
@@ -532,13 +602,13 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                         Ok(p) => {
                             log_debug(&format!("UpdateUIElement: cur_page={}", p));
                             p
-                        },
+                        }
                         Err(e) => {
                             log_debug(&format!("UpdateUIElement: GetCurrentPage failed: {:?}", e));
                             0
                         }
                     };
-                    
+
                     let page_start = if (cur_page as usize) < page_starts.len() {
                         page_starts[cur_page as usize] as usize
                     } else {
@@ -550,19 +620,19 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                         count as usize
                     };
 
-                    let sel = match cand_ele.GetSelection() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            log_debug(&format!("UpdateUIElement: GetSelection failed: {:?}", e));
-                            0
-                        }
-                    };
+                    let sel = cand_ele.GetSelection().unwrap_or_else(|e| {
+                        log_debug(&format!("UpdateUIElement: GetSelection failed: {:?}", e));
+                        0
+                    });
                     let rel_sel = if sel as usize >= page_start {
-                        (sel as usize - page_start) as usize
+                        sel as usize - page_start
                     } else {
                         0
                     };
-                    log_debug(&format!("UpdateUIElement: sel={}, page_start={}, page_end={}, rel_sel={}", sel, page_start, page_end, rel_sel));
+                    log_debug(&format!(
+                        "UpdateUIElement: sel={}, page_start={}, page_end={}, rel_sel={}",
+                        sel, page_start, page_end, rel_sel
+                    ));
 
                     let mut candidates = Vec::new();
                     for i in page_start..page_end {
@@ -570,11 +640,14 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                             Ok(bstr) => {
                                 let s = bstr.to_string();
                                 candidates.push(s);
-                            },
+                            }
                             Err(e) => {
-                                log_debug(&format!("UpdateUIElement: candidate[{}] error: {:?}", i, e));
+                                log_debug(&format!(
+                                    "UpdateUIElement: candidate[{}] error: {:?}",
+                                    i, e
+                                ));
                                 candidates.push("[err]".to_string());
-                            },
+                            }
                         }
                     }
 
@@ -584,7 +657,11 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                     };
 
                     if is_changed {
-                        log_debug(&format!("[Rust Candidates] Update: {} items, selected={}", candidates.len(), rel_sel));
+                        log_debug(&format!(
+                            "[Rust Candidates] Update: {} items, selected={}",
+                            candidates.len(),
+                            rel_sel
+                        ));
                         for (i, s) in candidates.iter().enumerate() {
                             log_debug(&format!("[Rust Candidates]   [{}] {}", i, s));
                         }
@@ -784,7 +861,10 @@ impl TsInputContext {
         // Check if we're on the main thread (required for TSF STA)
         // In Java, the main thread is typically the UI thread
         let current_thread_id = std::thread::current().id();
-        log_debug(&format!("Initializing TSF on thread: {:?}", current_thread_id));
+        log_debug(&format!(
+            "Initializing TSF on thread: {:?}",
+            current_thread_id
+        ));
 
         unsafe {
             let hwnd = HWND(hwnd as *mut _);
@@ -810,7 +890,7 @@ impl TsInputContext {
 
             // Get TF_CreateThreadMgr function
             log_debug("Getting TF_CreateThreadMgr function");
-            let proc_addr = GetProcAddress(h_msctf, windows::core::PCSTR("TF_CreateThreadMgr\0".as_ptr()));
+            let proc_addr = GetProcAddress(h_msctf, PCSTR("TF_CreateThreadMgr\0".as_ptr()));
             if proc_addr.is_none() {
                 log_error("Failed to get TF_CreateThreadMgr function address");
                 let _ = FreeLibrary(h_msctf);
@@ -829,7 +909,7 @@ impl TsInputContext {
             }
 
             // Use from_raw for safe conversion
-            let thread_mgr: ITfThreadMgr = windows::core::Interface::from_raw(thread_mgr_ptr);
+            let thread_mgr: ITfThreadMgr = Interface::from_raw(thread_mgr_ptr);
 
             // Get ITfThreadMgrEx for activation
             log_debug("Activating thread manager");
@@ -858,7 +938,10 @@ impl TsInputContext {
             };
 
             if hr.is_err() {
-                log_error(&format!("Failed to activate thread manager: {}", hr.unwrap_err()));
+                log_error(&format!(
+                    "Failed to activate thread manager: {}",
+                    hr.unwrap_err()
+                ));
                 return None;
             }
 
@@ -889,7 +972,7 @@ impl TsInputContext {
             let context_owner = ComObject::new(ContextOwner::new(std::ptr::null_mut()));
             let composition_handler = ComObject::new(CompositionHandler::new(std::ptr::null_mut()));
             let input_mode_handler = ComObject::new(InputModeHandler::new(std::ptr::null_mut()));
-            
+
             let inner = Box::new(TsInputContextInner {
                 hwnd,
                 thread_mgr: Some(thread_mgr.clone()),
@@ -915,13 +998,13 @@ impl TsInputContext {
 
             // Set input_ctx pointers for handlers to access their parent
             // We need to use get_mut() on ComObject to modify the inner struct
-            if let Some(mut owner) = (*inner_ptr).context_owner.get_mut() {
+            if let Some(owner) = (*inner_ptr).context_owner.get_mut() {
                 owner.input_ctx = inner_ptr;
             }
-            if let Some(mut handler) = (*inner_ptr).composition_handler.get_mut() {
+            if let Some(handler) = (*inner_ptr).composition_handler.get_mut() {
                 handler.input_ctx = inner_ptr;
             }
-            if let Some(mut handler) = (*inner_ptr).input_mode_handler.get_mut() {
+            if let Some(handler) = (*inner_ptr).input_mode_handler.get_mut() {
                 handler.input_ctx = inner_ptr;
             }
 
@@ -931,7 +1014,13 @@ impl TsInputContext {
                 log_debug("Calling CreateContext with CompositionHandler as sink...");
                 let mut edit_cookie = 0u32;
                 let comp_sink: IUnknown = (*inner_ptr).composition_handler.cast().ok()?;
-                if let Err(e) = doc_mgr.CreateContext(client_id, 0, &comp_sink, &mut (*inner_ptr).ctx, &mut edit_cookie) {
+                if let Err(e) = doc_mgr.CreateContext(
+                    client_id,
+                    0,
+                    &comp_sink,
+                    &mut (*inner_ptr).ctx,
+                    &mut edit_cookie,
+                ) {
                     log_error(&format!("Failed to create context: {}", e));
                     return None;
                 }
@@ -950,7 +1039,11 @@ impl TsInputContext {
                 // Then initialize handlers
                 if let Some(ref ctx) = (*inner_ptr).ctx {
                     log_debug("Initializing composition handler...");
-                    if let Err(e) = (*inner_ptr).composition_handler.get().initialize(ctx, client_id) {
+                    if let Err(e) = (*inner_ptr)
+                        .composition_handler
+                        .get()
+                        .initialize(ctx, client_id)
+                    {
                         log_warn(&format!("Failed to initialize composition handler: {}", e));
                     } else {
                         log_debug("Composition handler initialized");
@@ -971,7 +1064,11 @@ impl TsInputContext {
 
             // Initialize input mode handler
             log_debug("Initializing input mode handler...");
-            if let Err(e) = (*inner_ptr).input_mode_handler.get().initialize(&thread_mgr) {
+            if let Err(e) = (*inner_ptr)
+                .input_mode_handler
+                .get()
+                .initialize(&thread_mgr)
+            {
                 log_warn(&format!("Failed to initialize input mode handler: {}", e));
             } else {
                 log_debug("Input mode handler initialized");
@@ -979,9 +1076,7 @@ impl TsInputContext {
 
             log_info("TsInputContext created successfully");
 
-            Some(Box::new(TsInputContext {
-                inner: inner_ptr,
-            }))
+            Some(Box::new(TsInputContext { inner: inner_ptr }))
         }
     }
 }
@@ -992,9 +1087,7 @@ impl InputContext for TsInputContext {
     }
 
     fn get_input_mode(&self) -> InputMode {
-        unsafe {
-            (*self.inner).input_mode_handler.get().get_input_mode()
-        }
+        unsafe { (*self.inner).input_mode_handler.get().get_input_mode() }
     }
 
     fn get_activated(&self) -> bool {
@@ -1008,7 +1101,11 @@ impl InputContext for TsInputContext {
                 return;
             }
 
-            log_info(if activated { "Activating TSF" } else { "Deactivating TSF" });
+            log_info(if activated {
+                "Activating TSF"
+            } else {
+                "Deactivating TSF"
+            });
             inner.activated = activated;
 
             if let Some(ref thread_mgr) = inner.thread_mgr {
@@ -1018,7 +1115,7 @@ impl InputContext for TsInputContext {
                         let _ = services.TerminateComposition(None);
                     }
                 }
-                
+
                 if activated {
                     // Use AssociateFocus like the C version
                     if let Some(ref doc_mgr) = inner.doc_mgr {
@@ -1041,7 +1138,12 @@ impl InputContext for TsInputContext {
 
     fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
         unsafe {
-            (*self.inner).rect = PreEditRect { x, y, width, height };
+            (*self.inner).rect = PreEditRect {
+                x,
+                y,
+                width,
+                height,
+            };
         }
     }
 

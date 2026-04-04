@@ -3,11 +3,11 @@
 
 #![allow(non_snake_case)]
 
-use jni::objects::{Global, JClass, JObject, JValue};
-use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE, JavaVM as SysJavaVM};
-use jni::{EnvUnowned, JavaVM, jni_str, jni_sig};
+use jni::objects::{JClass, JObject, JValue};
+use jni::sys::{jboolean, jint, jlong, jstring, JavaVM as SysJavaVM, JNI_FALSE, JNI_TRUE};
+use jni::{jni_sig, jni_str, EnvUnowned, JavaVM};
 use std::num::NonZeroIsize;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use crate::interface::lib::{CandidateConfig, CandidateEvent, InputMode, PreEditEvent};
 use crate::logger;
@@ -94,7 +94,8 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             logger::log_info("Logger initialized, forwarding to Java Log4j");
         }
         Ok(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
 }
 
 // ============================================================================
@@ -160,7 +161,10 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
     }
 
     if ctx.is_none() {
-        log_info(&format!("ERROR: Failed to create InputContext for API {}", api));
+        log_info(&format!(
+            "ERROR: Failed to create InputContext for API {}",
+            api
+        ));
     }
 
     match ctx {
@@ -279,7 +283,8 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             result = s.into_raw();
         }
         Ok::<(), jni::errors::Error>(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
     result
 }
 
@@ -371,7 +376,8 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
                 }));
         }
         Ok(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
 }
 
 #[unsafe(no_mangle)]
@@ -445,7 +451,8 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
                 }));
         }
         Ok(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
 }
 
 #[unsafe(no_mangle)]
@@ -496,7 +503,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
                                 if let Ok(arr) = arr {
                                     for (i, s) in candidate.candidates.iter().enumerate() {
                                         if let Ok(jstr) = env.new_string(s) {
-                                            let _ = arr.set_element(env, i as usize, &jstr);
+                                            let _ = arr.set_element(env, i, &jstr);
                                         }
                                     }
                                     let _ = env.call_method(
@@ -529,7 +536,8 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
                 }));
         }
         Ok(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
 }
 
 #[unsafe(no_mangle)]
@@ -574,7 +582,6 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
                 }));
         }
         Ok(())
-    }).resolve::<jni::errors::LogErrorAndDefault>();
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
 }
-
-
