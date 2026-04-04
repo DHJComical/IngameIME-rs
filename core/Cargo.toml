@@ -7,8 +7,9 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# JNI - use 0.21.x for stable API
+# JNI - use 0.22.4 for stable API
 jni = "0.22.4"
+jni-sys = "0.4"
 
 # windows
 [target.'cfg(windows)'.dependencies]

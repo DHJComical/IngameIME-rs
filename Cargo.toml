@@ -11,5 +11,6 @@ codegen-units = 1
 # Use opt-level=1 for dev to avoid wgpu shader validation crashes
 [profile.dev]
 opt-level = 1
-debug-assertions = false
+debug = true
+debug-assertions = true
 overflow-checks = false
