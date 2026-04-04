@@ -180,6 +180,7 @@ pub struct CompositionHandler {
     ele_id: RefCell<u32>,
     cookie_ele: RefCell<u32>,
     cookie_edit: RefCell<u32>,
+    last_candidates: RefCell<Vec<String>>,
 }
 
 impl CompositionHandler {
@@ -192,6 +193,7 @@ impl CompositionHandler {
             ele_id: RefCell::new(TF_INVALID_UIELEMENTID),
             cookie_ele: RefCell::new(TF_INVALID_COOKIE),
             cookie_edit: RefCell::new(TF_INVALID_COOKIE),
+            last_candidates: RefCell::new(Vec::new()),
         }
     }
 
@@ -567,7 +569,6 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                         match cand_ele.GetString(i as u32) {
                             Ok(bstr) => {
                                 let s = bstr.to_string();
-                                log_debug(&format!("UpdateUIElement: candidate[{}]='{}'", i, s));
                                 candidates.push(s);
                             },
                             Err(e) => {
@@ -577,7 +578,19 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
                         }
                     }
 
-                    log_debug(&format!("UpdateUIElement: calling run_candidate_update with {} candidates, selected={}", candidates.len(), rel_sel));
+                    let is_changed = {
+                        let last = self.last_candidates.borrow();
+                        *last != candidates
+                    };
+
+                    if is_changed {
+                        log_debug(&format!("[Rust Candidates] Update: {} items, selected={}", candidates.len(), rel_sel));
+                        for (i, s) in candidates.iter().enumerate() {
+                            log_debug(&format!("[Rust Candidates]   [{}] {}", i, s));
+                        }
+                        *self.last_candidates.borrow_mut() = candidates.clone();
+                    }
+
                     self.run_candidate_update(candidates, rel_sel);
                 } else {
                     log_debug("UpdateUIElement: failed to cast to ITfCandidateListUIElement");
