@@ -10,14 +10,13 @@ use std::num::NonZeroIsize;
 use std::sync::{Mutex, OnceLock};
 
 use crate::interface::lib::{CandidateConfig, CandidateEvent, InputMode, PreEditEvent};
+use crate::logger;
 
 // ============================================================================
-// Global JavaVM and Logger reference - stored on first context creation
+// Global JavaVM reference - stored in JNI_OnLoad
 // ============================================================================
 
 static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
-static JAVA_LOGGER: OnceLock<Mutex<Option<Global<JObject<'static>>>>> = OnceLock::new();
-static DEBUG_LOGGING: OnceLock<Mutex<bool>> = OnceLock::new();
 
 /// JNI_OnLoad is called when the library is loaded
 #[unsafe(no_mangle)]
@@ -25,7 +24,6 @@ pub extern "system" fn JNI_OnLoad(vm: *mut SysJavaVM, _reserved: *mut std::ffi::
     unsafe {
         let java_vm = JavaVM::from_raw(vm);
         let _ = JAVA_VM.set(java_vm);
-        log_info("JNI_OnLoad called, JavaVM stored");
     }
     jni_sys::JNI_VERSION_1_8 as jint
 }
@@ -34,25 +32,14 @@ fn get_java_vm() -> Option<&'static JavaVM> {
     JAVA_VM.get()
 }
 
-/// Simpler logging using println that gets captured by Forge
-pub fn log_info(message: &str) {
-    println!("[IngameIME-Rust] {}", message);
+/// Log info level message
+fn log_info(message: &str) {
+    logger::log_info(message);
 }
 
-pub fn log_debug(message: &str) {
-    let should_log = if let Some(debug_guard) = DEBUG_LOGGING.get() {
-        if let Ok(debug) = debug_guard.lock() {
-            *debug
-        } else {
-            true
-        }
-    } else {
-        true
-    };
-
-    if should_log {
-        println!("[IngameIME-Rust-DEBUG] {}", message);
-    }
+/// Log debug level message
+fn log_debug(message: &str) {
+    logger::log_debug(message);
 }
 
 // ============================================================================
@@ -80,10 +67,34 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
     enabled: jboolean,
 ) {
     let is_enabled = enabled != JNI_FALSE;
-    let _ = DEBUG_LOGGING.set(Mutex::new(is_enabled));
+    logger::set_debug(is_enabled);
     if is_enabled {
-        log_info("Debug logging enabled");
+        logger::log_info("Debug logging enabled");
     }
+}
+
+/// Initialize Java Logger reference
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1init_1logger(
+    mut env: EnvUnowned,
+    _class: JClass,
+    logger_obj: JObject,
+) {
+    if logger_obj.is_null() {
+        return;
+    }
+
+    env.with_env(|env| -> Result<(), jni::errors::Error> {
+        let Ok(global_ref) = env.new_global_ref(&logger_obj) else {
+            return Ok(());
+        };
+
+        if let Some(vm) = get_java_vm() {
+            logger::init(vm.clone(), global_ref);
+            logger::log_info("Logger initialized, forwarding to Java Log4j");
+        }
+        Ok(())
+    }).resolve::<jni::errors::LogErrorAndDefault>();
 }
 
 // ============================================================================

@@ -43,19 +43,19 @@ use crate::interface::lib::{
 };
 
 fn log_info(msg: &str) {
-    crate::interface::jni_api::log_info(msg);
+    crate::logger::log_info(msg);
 }
 
 fn log_debug(msg: &str) {
-    crate::interface::jni_api::log_debug(msg);
+    crate::logger::log_debug(msg);
 }
 
 fn log_error(msg: &str) {
-    crate::interface::jni_api::log_info(&format!("ERROR: {}", msg));
+    crate::logger::log_error(msg);
 }
 
 fn log_warn(msg: &str) {
-    crate::interface::jni_api::log_info(&format!("WARN: {}", msg));
+    crate::logger::log_warn(msg);
 }
 
 fn to_utf8(wide: &[u16]) -> String {
