@@ -52,9 +52,21 @@ impl<'a> EguiWindow<'a> {
         info!("Creating EguiWindow");
 
         let attrs = Window::default_attributes()
-            .with_title("IngameIME Application")
-            .with_visible(false);
+            .with_title("IngameIME Application - Click text box and press Ctrl+Space to switch IME")
+            .with_visible(true)
+            .with_resizable(true)
+            .with_inner_size(LogicalSize::new(800, 600));
         let window = Arc::new(el.create_window(attrs).unwrap());
+        
+        // Enable IME support - this is critical for Chinese/Japanese/Korean input
+        info!("Enabling IME support...");
+        window.set_ime_allowed(true);
+        window.set_ime_cursor_area(
+            winit::dpi::LogicalPosition { x: 100.0, y: 100.0 },
+            winit::dpi::LogicalSize { width: 200.0, height: 30.0 }
+        );
+        info!("IME support enabled - allowed=true");
+        info!("IME cursor area set to (100, 100) size (200, 30)");
 
         debug!("Get RawWindowHandle");
         let handle = window
@@ -65,7 +77,7 @@ impl<'a> EguiWindow<'a> {
 
         debug!("Init Wgpu instance");
         let instance = Instance::new(&InstanceDescriptor {
-            backends: Backends::all(),
+            backends: Backends::DX12 | Backends::VULKAN,
             ..Default::default()
         });
 
@@ -83,11 +95,23 @@ impl<'a> EguiWindow<'a> {
             pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
 
         debug!("Acquire default surface configuration");
-        let config = surface.get_default_config(&adapter, 0, 0).unwrap();
+        // Use actual window size instead of 0x0
+        let inner_size = window.inner_size();
+        let mut config = surface
+            .get_default_config(&adapter, inner_size.width, inner_size.height)
+            .unwrap();
+        // Use Mailbox present mode to avoid Fifo issues
+        config.present_mode = wgpu::PresentMode::AutoVsync;
         debug!("{:?}", config);
+
+        // Configure surface immediately with proper size
+        debug!("Configuring surface...");
+        surface.configure(&device, &config);
+        debug!("Surface configured");
 
         debug!("Create Egui context");
         let context = Context::default();
+        debug!("Egui context created");
 
         debug!("Create Egui state");
         let state = State::new(
@@ -98,9 +122,11 @@ impl<'a> EguiWindow<'a> {
             None,
             None,
         );
+        debug!("Egui state created");
 
         debug!("Create Egui renderer");
         let renderer = Renderer::new(&device, config.format, RendererOptions::default());
+        debug!("Egui renderer created");
 
         info!("EguiWindow created");
 
@@ -250,6 +276,7 @@ impl<'a> EguiWindow<'a> {
     }
 
     pub fn handler_platform(&mut self, platform: PlatformOutput) {
+        // Let egui_winit handle IME cursor area automatically
         self.state.handle_platform_output(&self.inner, platform);
     }
 
@@ -290,6 +317,25 @@ impl<'a> EguiWindow<'a> {
     }
 
     pub fn on_window_event(&mut self, event: WindowEvent) {
+        // Process IME events FIRST before other events
+        // This is critical for proper IME input handling
+        if let WindowEvent::Ime(ime_event) = &event {
+            match ime_event {
+                winit::event::Ime::Commit(text) => {
+                    debug!("IME Commit: {}", text);
+                }
+                winit::event::Ime::Preedit(text, cursor) => {
+                    debug!("IME Preedit: '{}' cursor={:?}", text, cursor);
+                }
+                winit::event::Ime::Enabled => {
+                    debug!("IME Enabled");
+                }
+                winit::event::Ime::Disabled => {
+                    debug!("IME Disabled");
+                }
+            }
+        }
+        
         if let WindowEvent::Focused(focused) = event {
             // 窗口失去焦点时，取消独占全屏，从而能正常切换窗口
             if self.mode == WindowMode::Exclusive {
@@ -300,7 +346,10 @@ impl<'a> EguiWindow<'a> {
                 }
             }
         }
-        if self.state.on_window_event(&self.inner, &event).repaint {
+        
+        // Let egui handle the event (including IME)
+        let response = self.state.on_window_event(&self.inner, &event);
+        if response.repaint {
             self.inner.request_redraw();
         }
     }

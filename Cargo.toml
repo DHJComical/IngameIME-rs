@@ -7,3 +7,9 @@ opt-level = 3
 debug = false
 lto = "thin"
 codegen-units = 1
+
+# Use opt-level=1 for dev to avoid wgpu shader validation crashes
+[profile.dev]
+opt-level = 1
+debug-assertions = false
+overflow-checks = false
