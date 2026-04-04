@@ -51,10 +51,14 @@ unsafe extern "system" fn ingame_ime_proc(
 ) -> LRESULT {
     unsafe {
         let handle = GetPropW(hwnd, w!("IngameIME_Userdata"));
-        if !handle.is_invalid() {
-            let context = &*(handle.0 as *const Imm32InputContext);
+        if handle.is_invalid() {
+            // Context not set, use default window proc
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+        }
 
-            match msg {
+        let context = &*(handle.0 as *const Imm32InputContext);
+
+        match msg {
                 WM_INPUTLANGCHANGEREQUEST => {
                     log_debug("WM_INPUTLANGCHANGEREQUEST");
                     return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -162,13 +166,13 @@ unsafe extern "system" fn ingame_ime_proc(
                 }
                 // default
                 _ => {
-                    return CallWindowProcW(context.proc, hwnd, msg, wparam, lparam);
+                    if let Some(proc) = context.proc {
+                        return CallWindowProcW(proc, hwnd, msg, wparam, lparam);
+                    } else {
+                        return DefWindowProcW(hwnd, msg, wparam, lparam);
+                    }
                 }
             }
-        }
-
-        log_warn("Unable to GetPropW for IngameIME_Userdata");
-        return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 }
 
@@ -179,7 +183,7 @@ pub struct Imm32InputContext {
     activated: bool,
     ui_less: bool,
     rect: RECT,
-    proc: WNDPROC,
+    proc: Option<WNDPROC>,
     commit_cb: Option<CommitCallback>,
     preedit_cb: Option<PreEditCallback>,
     candidate_cb: Option<CandidateCallback>,
@@ -200,22 +204,15 @@ impl Imm32InputContext {
                 log_debug("Associate NULL HIMC to disable IME");
                 let prev = ImmAssociateContext(hwnd, HIMC::default());
 
-                log_debug("Replace WNDPROC");
-                let proc: WNDPROC = std::mem::transmute(SetWindowLongPtrW(
-                    hwnd,
-                    GWLP_WNDPROC,
-                    ingame_ime_proc as *const () as isize,
-                ));
-
                 log_debug("Create context");
-                let context = Box::new(Imm32InputContext {
+                let mut context = Box::new(Imm32InputContext {
                     hwnd,
                     prev,
                     himc,
                     activated: false,
                     ui_less,
                     rect: RECT::default(),
-                    proc,
+                    proc: None,
                     commit_cb: None,
                     preedit_cb: None,
                     candidate_cb: None,
@@ -226,11 +223,23 @@ impl Imm32InputContext {
 
                 log_debug("Save userdata for WNDPROC");
                 let ptr = &*context as *const Imm32InputContext as _;
-                match SetPropW(hwnd, w!("IngameIME_Userdata"), HANDLE(ptr)) {
+                match SetPropW(hwnd, w!("IngameIME_Userdata"), Option::from(HANDLE(ptr))) {
                     Ok(_) => {
+                        log_debug("Replace WNDPROC");
+                        let proc_ptr = SetWindowLongPtrW(
+                            hwnd,
+                            GWLP_WNDPROC,
+                            ingame_ime_proc as *const () as isize,
+                        );
+                        let proc: WNDPROC = std::mem::transmute(proc_ptr);
+                        context.proc = Some(proc);
+
                         log_debug("Config OpenStatus");
                         if (!ImmSetOpenStatus(himc, true)).into() {
                             log_error("Unable to SetOpenStatus");
+                            // Restore original WNDPROC
+                            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc_ptr);
+                            SetPropW(hwnd, w!("IngameIME_Userdata"), Option::from(HANDLE::default())).ok();
                             return None;
                         }
                         log_info("Imm32InputContext created");
@@ -517,9 +526,12 @@ impl Drop for Imm32InputContext {
             // disable ime
             self.set_activated(false);
             // restore previous wndproc
-            SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, std::mem::transmute(self.proc));
+            if let Some(proc) = self.proc {
+                let proc_ptr: isize = std::mem::transmute(proc);
+                SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, proc_ptr);
+            }
             // clear pointer which will be invalid
-            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), HANDLE::default())
+            let _ = SetPropW(self.hwnd, w!("IngameIME_Userdata"), Option::from(HANDLE::default()))
                 .inspect_err(|e| {
                     log_error(&format!("Unable to SetPropW for IngameIME_Userdata: {}", e));
                 });

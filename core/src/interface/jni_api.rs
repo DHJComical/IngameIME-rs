@@ -3,23 +3,23 @@
 
 #![allow(non_snake_case)]
 
-use jni::objects::{GlobalRef, JClass, JObject, JValue};
+use jni::objects::{Global, JClass, JObject, JValue};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
-use jni::JNIEnv;
+use jni::{Env, jni_str, jni_sig};
 use std::num::NonZeroIsize;
 use std::sync::{Mutex, OnceLock};
 
 use crate::interface::lib::{CandidateConfig, CandidateEvent, InputMode, PreEditEvent};
 
 // ============================================================================
-// Global JavaVM and Logger reference �?stored on first context creation
+// Global JavaVM and Logger reference - stored on first context creation
 // ============================================================================
 
 static JAVA_VM: OnceLock<jni::JavaVM> = OnceLock::new();
-static JAVA_LOGGER: OnceLock<Mutex<Option<GlobalRef>>> = OnceLock::new();
+static JAVA_LOGGER: OnceLock<Mutex<Option<Global<JObject<'static>>>>> = OnceLock::new();
 static DEBUG_LOGGING: OnceLock<Mutex<bool>> = OnceLock::new();
 
-fn init_java_vm(env: &JNIEnv) {
+fn init_java_vm(env: &Env) {
     if JAVA_VM.get().is_none() {
         if let Ok(vm) = env.get_java_vm() {
             let _ = JAVA_VM.set(vm);
@@ -32,51 +32,54 @@ fn get_java_vm() -> Option<&'static jni::JavaVM> {
 }
 
 /// Initialize Java logger reference
-fn init_java_logger(env: &mut JNIEnv) {
+fn init_java_logger(vm: &jni::JavaVM) {
     if JAVA_LOGGER.get().is_none() {
-        if let Ok(logger_class) = env.find_class("org/apache/logging/log4j/LogManager") {
-            if let Ok(logger_obj) = env.call_static_method(
-                &logger_class,
-                "getLogger",
-                "(Ljava/lang/String;)Lorg/apache/logging/log4j/Logger;",
-                &[JValue::Object(
-                    &env.new_string("IngameIME-Rust").unwrap().into(),
-                )],
-            ) {
+        let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
+            if let Ok(logger_class) = env.find_class(jni_str!("org/apache/logging/log4j/LogManager")) {
+                let jname = env.new_string("IngameIME-Rust")?;
+                let logger_obj = env.call_static_method(
+                    &logger_class,
+                    jni_str!("getLogger"),
+                    jni_sig!((string: java.lang.String) -> java.lang.String),
+                    &[JValue::Object(&jname)],
+                )?;
                 if let Ok(logger_global) = env.new_global_ref(logger_obj.l().unwrap()) {
                     let _ = JAVA_LOGGER.set(Mutex::new(Some(logger_global)));
                 }
             }
-        }
+            Ok(())
+        });
     }
 }
 
 /// Log a message to Java logger
 fn log_to_java(level: &str, message: &str) {
     if let Some(vm) = get_java_vm() {
-        if let Ok(mut env) = vm.attach_current_thread_permanently() {
+        let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
             if let Some(logger_guard) = JAVA_LOGGER.get() {
                 if let Ok(logger_opt) = logger_guard.lock() {
                     if let Some(logger) = logger_opt.as_ref() {
                         let Ok(jlevel) = env.new_string(level) else {
-                            return;
+                            return Ok(());
                         };
                         let Ok(jmsg) = env.new_string(message) else {
-                            return;
+                            return Ok(());
                         };
+                        let jlevel_obj = env.new_string(level).unwrap();
                         let _ = env.call_method(
                             logger,
-                            "log",
-                            "(Lorg/apache/logging/log4j/Level;Ljava/lang/Object;)V",
+                            jni_str!("log"),
+                            jni_sig!((a: java.lang.Object, b: java.lang.Object) -> void),
                             &[
-                                JValue::Object(&env.new_string(level).unwrap().into()),
-                                JValue::Object(&jmsg.into()),
+                                JValue::Object(&jlevel_obj),
+                                JValue::Object(&jmsg),
                             ],
                         );
                     }
                 }
             }
-        }
+            Ok(())
+        });
     }
 }
 
@@ -106,7 +109,7 @@ pub fn log_debug(message: &str) {
 /// Enable or disable debug logging (called from Java)
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1debug_1logging(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     enabled: jboolean,
 ) {
@@ -118,7 +121,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 }
 
 // ============================================================================
-// ImeContext �?thin wrapper that owns the dyn InputContext
+// ImeContext - thin wrapper that owns the dyn InputContext
 // ============================================================================
 
 pub struct ImeContext {
@@ -137,12 +140,13 @@ impl ImeContext {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1create_1input_1context_1win32(
-    env: JNIEnv,
+    env: Env,
     _class: JClass,
     hwnd: jlong,
     api: jint,
     ui_less: jboolean,
 ) -> jlong {
+    init_java_vm(&env);
     init_java_vm(&env);
 
     let hwnd_nz = match NonZeroIsize::new(hwnd as isize) {
@@ -169,7 +173,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
         {
             ctx = crate::interface::tsf::TsInputContext::new(hwnd as isize, is_ui_less);
         }
-        
+
         // If TSF failed, fallback to IMM32
         if ctx.is_none() {
             log_info("TSF initialization failed, falling back to IMM32...");
@@ -211,7 +215,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1destroy_1input_1context(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
 ) {
@@ -228,7 +232,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1input_1context_1activated(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
     activated: jboolean,
@@ -243,7 +247,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1is_1input_1context_1activated(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
 ) -> jboolean {
@@ -263,7 +267,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1get_1input_1mode(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
 ) -> jint {
@@ -283,7 +287,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1pre_1edit_1rect(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
     x: jint,
@@ -305,7 +309,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1get_1version(
-    env: JNIEnv,
+    mut env: Env,
     _class: JClass,
 ) -> jstring {
     let version = env!("CARGO_PKG_VERSION");
@@ -321,7 +325,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1max_1candidates(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
     max_candidates: jint,
@@ -346,7 +350,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1get_1max_1candidates(
-    _env: JNIEnv,
+    _env: Env,
     _class: JClass,
     ptr: jlong,
 ) -> jint {
@@ -366,7 +370,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1commit_1callback(
-    env: JNIEnv,
+    env: Env,
     _class: JClass,
     ptr: jlong,
     callback: JObject,
@@ -379,7 +383,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
         return;
     }
 
-    let Ok(global_ref) = env.new_global_ref(callback) else {
+    let Ok(global_ref) = env.new_global_ref(&callback) else {
         return;
     };
 
@@ -389,28 +393,25 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             .ctx
             .set_commit_callback(Box::new(move |text: String| {
                 let Some(vm) = get_java_vm() else { return };
-                let Ok(mut env) = vm
-                    .attach_current_thread_permanently()
-                    .and_then(|_| vm.get_env())
-                else {
-                    return;
-                };
-                let Ok(jstr) = env.new_string(&text) else {
-                    return;
-                };
-                let _ = env.call_method(
-                    &global_ref,
-                    "onCommit",
-                    "(Ljava/lang/String;)V",
-                    &[JValue::Object(&jstr)],
-                );
+                let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
+                    let Ok(jstr) = env.new_string(&text) else {
+                        return Ok(());
+                    };
+                    let _ = env.call_method(
+                        &global_ref,
+                        jni_str!("onCommit"),
+                        jni_sig!((string: java.lang.String) -> void),
+                        &[JValue::Object(&jstr)],
+                    );
+                    Ok(())
+                });
             }));
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1pre_1edit_1callback(
-    env: JNIEnv,
+    env: Env,
     _class: JClass,
     ptr: jlong,
     callback: JObject,
@@ -423,7 +424,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
         return;
     }
 
-    let Ok(global_ref) = env.new_global_ref(callback) else {
+    let Ok(global_ref) = env.new_global_ref(&callback) else {
         return;
     };
 
@@ -433,60 +434,57 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             .ctx
             .set_preedit_callback(Box::new(move |event: PreEditEvent| {
                 let Some(vm) = get_java_vm() else { return };
-                let Ok(mut env) = vm
-                    .attach_current_thread_permanently()
-                    .and_then(|_| vm.get_env())
-                else {
-                    return;
-                };
-                match &event {
-                    PreEditEvent::Begin => {
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onPreEdit",
-                            "(ILjava/lang/String;I)V",
-                            &[
-                                JValue::Int(0),
-                                JValue::Object(&JObject::null()),
-                                JValue::Int(-1),
-                            ],
-                        );
+                let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
+                    match &event {
+                        PreEditEvent::Begin => {
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onPreEdit"),
+                                jni_sig!((a: java.lang.int, b: java.lang.String, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(0),
+                                    JValue::Object(&JObject::null()),
+                                    JValue::Int(-1),
+                                ],
+                            );
+                        }
+                        PreEditEvent::Update(preedit) => {
+                            let Ok(jstr) = env.new_string(&preedit.text) else {
+                                return Ok(());
+                            };
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onPreEdit"),
+                                jni_sig!((a: java.lang.int, b: java.lang.String, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(1),
+                                    JValue::Object(&jstr),
+                                    JValue::Int(preedit.cursor as jint),
+                                ],
+                            );
+                        }
+                        PreEditEvent::End => {
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onPreEdit"),
+                                jni_sig!((a: java.lang.int, b: java.lang.String, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(2),
+                                    JValue::Object(&JObject::null()),
+                                    JValue::Int(-1),
+                                ],
+                            );
+                        }
                     }
-                    PreEditEvent::Update(preedit) => {
-                        let Ok(jstr) = env.new_string(&preedit.text) else {
-                            return;
-                        };
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onPreEdit",
-                            "(ILjava/lang/String;I)V",
-                            &[
-                                JValue::Int(1),
-                                JValue::Object(&jstr),
-                                JValue::Int(preedit.cursor as jint),
-                            ],
-                        );
-                    }
-                    PreEditEvent::End => {
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onPreEdit",
-                            "(ILjava/lang/String;I)V",
-                            &[
-                                JValue::Int(2),
-                                JValue::Object(&JObject::null()),
-                                JValue::Int(-1),
-                            ],
-                        );
-                    }
-                }
+                    Ok(())
+                });
             }));
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1candidate_1list_1callback(
-    env: JNIEnv,
+    env: Env,
     _class: JClass,
     ptr: jlong,
     callback: JObject,
@@ -499,7 +497,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
         return;
     }
 
-    let Ok(global_ref) = env.new_global_ref(callback) else {
+    let Ok(global_ref) = env.new_global_ref(&callback) else {
         return;
     };
 
@@ -509,70 +507,67 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             .ctx
             .set_candidate_callback(Box::new(move |event: CandidateEvent| {
                 let Some(vm) = get_java_vm() else { return };
-                let Ok(mut env) = vm
-                    .attach_current_thread_permanently()
-                    .and_then(|_| vm.get_env())
-                else {
-                    return;
-                };
-                match &event {
-                    CandidateEvent::Begin => {
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onCandidateList",
-                            "(I[Ljava/lang/String;I)V",
-                            &[
-                                JValue::Int(0),
-                                JValue::Object(&JObject::null()),
-                                JValue::Int(-1),
-                            ],
-                        );
-                    }
-                    CandidateEvent::Update(candidate) => {
-                        let Ok(arr) = env.new_object_array(
-                            candidate.candidates.len() as jint,
-                            "java/lang/String",
-                            JObject::null(),
-                        ) else {
-                            return;
-                        };
-                        for (i, s) in candidate.candidates.iter().enumerate() {
-                            let Ok(jstr) = env.new_string(s) else {
-                                continue;
-                            };
-                            let _ = env.set_object_array_element(&arr, i as jint, jstr);
+                let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
+                    match &event {
+                        CandidateEvent::Begin => {
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onCandidateList"),
+                                jni_sig!((a: java.lang.int, b: java.lang.Object, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(0),
+                                    JValue::Object(&JObject::null()),
+                                    JValue::Int(-1),
+                                ],
+                            );
                         }
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onCandidateList",
-                            "(I[Ljava/lang/String;I)V",
-                            &[
-                                JValue::Int(1),
-                                JValue::Object(&arr),
-                                JValue::Int(candidate.selected as jint),
-                            ],
-                        );
+                        CandidateEvent::Update(candidate) => {
+                            let Ok(arr) = env.new_object_array(
+                                candidate.candidates.len() as jint,
+                                jni_str!("java/lang/String"),
+                                JObject::null(),
+                            ) else {
+                                return Ok(());
+                            };
+                            for (i, s) in candidate.candidates.iter().enumerate() {
+                                let Ok(jstr) = env.new_string(s) else {
+                                    continue;
+                                };
+                                let _ = arr.set_element(env, i as usize, &jstr);
+                            }
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onCandidateList"),
+                                jni_sig!((a: java.lang.int, b: java.lang.Object, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(1),
+                                    JValue::Object(&arr),
+                                    JValue::Int(candidate.selected as jint),
+                                ],
+                            );
+                        }
+                        CandidateEvent::End => {
+                            let _ = env.call_method(
+                                &global_ref,
+                                jni_str!("onCandidateList"),
+                                jni_sig!((a: java.lang.int, b: java.lang.Object, c: java.lang.int) -> void),
+                                &[
+                                    JValue::Int(2),
+                                    JValue::Object(&JObject::null()),
+                                    JValue::Int(-1),
+                                ],
+                            );
+                        }
                     }
-                    CandidateEvent::End => {
-                        let _ = env.call_method(
-                            &global_ref,
-                            "onCandidateList",
-                            "(I[Ljava/lang/String;I)V",
-                            &[
-                                JValue::Int(2),
-                                JValue::Object(&JObject::null()),
-                                JValue::Int(-1),
-                            ],
-                        );
-                    }
-                }
+                    Ok(())
+                });
             }));
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1input_1mode_1callback(
-    env: JNIEnv,
+    env: Env,
     _class: JClass,
     ptr: jlong,
     callback: JObject,
@@ -585,7 +580,7 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
         return;
     }
 
-    let Ok(global_ref) = env.new_global_ref(callback) else {
+    let Ok(global_ref) = env.new_global_ref(&callback) else {
         return;
     };
 
@@ -595,23 +590,20 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
             .ctx
             .set_input_mode_callback(Box::new(move |mode: InputMode| {
                 let Some(vm) = get_java_vm() else { return };
-                let Ok(mut env) = vm
-                    .attach_current_thread_permanently()
-                    .and_then(|_| vm.get_env())
-                else {
-                    return;
-                };
-                let mode_int: jint = match mode {
-                    InputMode::Alpha => 0,
-                    InputMode::Native => 1,
-                    InputMode::Unsupported => 2,
-                };
-                let _ = env.call_method(
-                    &global_ref,
-                    "onInputModeChanged",
-                    "(I)V",
-                    &[JValue::Int(mode_int)],
-                );
+                let _: Result<(), jni::errors::Error> = vm.attach_current_thread(|env| {
+                    let mode_int: jint = match mode {
+                        InputMode::Alpha => 0,
+                        InputMode::Native => 1,
+                        InputMode::Unsupported => 2,
+                    };
+                    let _ = env.call_method(
+                        &global_ref,
+                        jni_str!("onInputModeChanged"),
+                        jni_sig!((a: java.lang.int) -> void),
+                        &[JValue::Int(mode_int)],
+                    );
+                    Ok(())
+                });
             }));
     }
 }

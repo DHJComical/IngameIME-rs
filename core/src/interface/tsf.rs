@@ -9,7 +9,6 @@
 use std::cell::RefCell;
 use std::char::decode_utf16;
 use std::ffi::c_void;
-use std::sync::atomic::AtomicU32;
 
 use windows::{
     core::*,
@@ -17,6 +16,7 @@ use windows::{
     Win32::Graphics::Gdi::MapWindowPoints,
     Win32::System::Com::*,
     Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+    Win32::System::Variant::VARIANT,
     Win32::UI::TextServices::*,
     Win32::UI::WindowsAndMessaging::GetWindowRect,
 };
@@ -28,14 +28,10 @@ unsafe extern "system" {
 }
 
 // IID constants for TSF interfaces
-const IID_ITfTextEditSink: GUID = GUID::from_u128(0x0491dd00_1172_4b71_84aa_8f4b3aeb517b);
-const IID_ITfUIElementSink: GUID = GUID::from_u128(0xea1680b9_0c0d_4d8d_b6e5_89a02b7dd6b0);
-const IID_ITfCompartmentEventSink: GUID = GUID::from_u128(0x25f36c01_2a81_4e67_8d30_5f76d7cc5b07);
-const IID_ITfThreadMgr: GUID = GUID::from_u128(0xaa80e801_2021_11d2_93e0_00609778470c);
-const IID_ITfContextOwner: GUID = GUID::from_u128(0x96eb9ce0_90e0_4c39_87c0_6e4d5e066226);
-
-// TSF constants
+// These are available through Interface::IID for all interface types
 const TF_INVALID_UIELEMENTID: u32 = 0xffffffff;
+const TF_INVALID_COOKIE: u32 = 0;
+const TF_DEFAULT_SELECTION: u32 = 0;
 
 // TF_CreateThreadMgr function pointer type
 type TfCreateThreadMgr = unsafe extern "system" fn(*mut *mut c_void) -> HRESULT;
@@ -93,7 +89,6 @@ impl PreEditRect {
 
 #[implement(ITfContextOwner)]
 pub struct ContextOwner {
-    ref_count: AtomicU32,
     input_ctx: *mut TsInputContextInner,
     cookie: RefCell<u32>,
 }
@@ -101,7 +96,6 @@ pub struct ContextOwner {
 impl ContextOwner {
     pub fn new(input_ctx: *mut TsInputContextInner) -> Self {
         Self {
-            ref_count: AtomicU32::new(1),
             input_ctx,
             cookie: RefCell::new(TF_INVALID_COOKIE),
         }
@@ -130,18 +124,18 @@ impl ContextOwner {
 
 impl ITfContextOwner_Impl for ContextOwner_Impl {
     fn GetACPFromPoint(&self, _ptscreen: *const POINT, _dwflags: u32) -> Result<i32> {
-        Err(Error::from_win32())
+        Err(Error::from_hresult(HRESULT::from_win32(ERROR_NOT_SUPPORTED.0)))
     }
 
     fn GetTextExt(&self, _acpstart: i32, _acpend: i32, prc: *mut RECT, pfclipped: *mut BOOL) -> Result<()> {
         unsafe {
             if prc.is_null() {
-                return Err(Error::from_win32());
+                return Err(Error::from_hresult(HRESULT::from_win32(ERROR_INVALID_PARAMETER.0)));
             }
             *prc = self.get_rect().to_rect();
             // Map window coordinates to screen coordinates
             let hwnd = self.get_hwnd();
-            let _ = MapWindowPoints(hwnd, None, core::slice::from_raw_parts_mut(prc as *mut POINT, 2));
+            let _ = MapWindowPoints(Some(hwnd), None, core::slice::from_raw_parts_mut(prc as *mut POINT, 2));
             if !pfclipped.is_null() {
                 *pfclipped = BOOL(0);
             }
@@ -179,7 +173,6 @@ impl ITfContextOwner_Impl for ContextOwner_Impl {
 
 #[implement(ITfContextOwnerCompositionSink, ITfTextEditSink, ITfUIElementSink)]
 pub struct CompositionHandler {
-    ref_count: AtomicU32,
     input_ctx: *mut TsInputContextInner,
     comp_view: RefCell<Option<ITfRangeACP>>,
     ele_mgr: RefCell<Option<ITfUIElementMgr>>,
@@ -192,7 +185,6 @@ pub struct CompositionHandler {
 impl CompositionHandler {
     pub fn new(input_ctx: *mut TsInputContextInner) -> Self {
         Self {
-            ref_count: AtomicU32::new(1),
             input_ctx,
             comp_view: RefCell::new(None),
             ele_mgr: RefCell::new(None),
@@ -210,16 +202,18 @@ impl CompositionHandler {
             if inner.ui_less {
                 if let Ok(thread_mgr) = inner.thread_mgr.as_ref().unwrap().cast::<ITfUIElementMgr>() {
                     let source: ITfSource = thread_mgr.cast()?;
-                    let unknown: IUnknown = self.cast()?;
-                    let cookie = source.AdviseSink(&IID_ITfUIElementSink, &unknown)?;
+                    // Get IUnknown from our ComObject
+                    let unknown: IUnknown = inner.composition_handler.to_interface();
+                    let cookie = source.AdviseSink(&ITfUIElementSink::IID, &unknown)?;
                     *self.cookie_ele.borrow_mut() = cookie;
                     *self.ele_mgr.borrow_mut() = Some(thread_mgr);
                 }
             }
 
             let source: ITfSource = ctx.cast()?;
-            let unknown: IUnknown = self.cast()?;
-            let cookie = source.AdviseSink(&IID_ITfTextEditSink, &unknown)?;
+            // Get IUnknown from our ComObject
+            let unknown: IUnknown = inner.composition_handler.to_interface();
+            let cookie = source.AdviseSink(&ITfTextEditSink::IID, &unknown)?;
             *self.cookie_edit.borrow_mut() = cookie;
 
             Ok(())
@@ -304,28 +298,32 @@ impl CompositionHandler {
 }
 
 impl ITfContextOwnerCompositionSink_Impl for CompositionHandler_Impl {
-    fn OnStartComposition(&self, pcomposition: Option<&ITfCompositionView>) -> Result<BOOL> {
+    fn OnStartComposition(&self, pcomposition: windows_core::Ref<ITfCompositionView>) -> Result<BOOL> {
         log_debug("OnStartComposition");
-        if let Some(comp) = pcomposition {
-            if let Ok(range) = comp.cast::<ITfRangeACP>() {
-                *self.comp_view.borrow_mut() = Some(range);
+        unsafe {
+            if let Some(comp_view) = pcomposition.as_ref() {
+                if let Ok(range) = comp_view.cast::<ITfRangeACP>() {
+                    *self.comp_view.borrow_mut() = Some(range);
+                }
             }
         }
         self.run_preedit_begin();
         Ok(BOOL(1))
     }
 
-    fn OnUpdateComposition(&self, pcomposition: Option<&ITfCompositionView>, _prangenew: Option<&ITfRange>) -> Result<()> {
+    fn OnUpdateComposition(&self, pcomposition: windows_core::Ref<ITfCompositionView>, _prangenew: windows_core::Ref<ITfRange>) -> Result<()> {
         log_debug("OnUpdateComposition");
-        if let Some(comp) = pcomposition {
-            if let Ok(range) = comp.cast::<ITfRangeACP>() {
-                *self.comp_view.borrow_mut() = Some(range);
+        unsafe {
+            if let Some(comp_view) = pcomposition.as_ref() {
+                if let Ok(range) = comp_view.cast::<ITfRangeACP>() {
+                    *self.comp_view.borrow_mut() = Some(range);
+                }
             }
         }
         Ok(())
     }
 
-    fn OnEndComposition(&self, _pcomposition: Option<&ITfCompositionView>) -> Result<()> {
+    fn OnEndComposition(&self, _pcomposition: windows_core::Ref<ITfCompositionView>) -> Result<()> {
         log_debug("OnEndComposition");
         *self.comp_view.borrow_mut() = None;
         self.run_preedit_end();
@@ -334,10 +332,9 @@ impl ITfContextOwnerCompositionSink_Impl for CompositionHandler_Impl {
 }
 
 impl ITfTextEditSink_Impl for CompositionHandler_Impl {
-    fn OnEndEdit(&self, pic: Option<&ITfContext>, ec: u32, _peditrecord: Option<&ITfEditRecord>) -> Result<()> {
+    fn OnEndEdit(&self, pic: windows_core::Ref<ITfContext>, ec: u32, _peditrecord: windows_core::Ref<ITfEditRecord>) -> Result<()> {
         log_debug("OnEndEdit");
         unsafe {
-            let Some(ctx) = pic else { return Ok(()); };
             if self.comp_view.borrow().is_none() {
                 return Ok(());
             }
@@ -347,9 +344,11 @@ impl ITfTextEditSink_Impl for CompositionHandler_Impl {
                 if range.GetExtent(&mut acp_start, &mut len).is_ok() && len > 0 {
                     let mut selections = [TF_SELECTION::default()];
                     let mut fetched = 0u32;
-                    if ctx.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selections, &mut fetched).is_ok() && fetched > 0 {
-                        let text = format!("[{} chars]", len);
-                        self.run_preedit_update(text, acp_start as usize);
+                    if let Some(ctx) = pic.as_ref() {
+                        if ctx.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selections, &mut fetched).is_ok() && fetched > 0 {
+                            let text = format!("[{} chars]", len);
+                            self.run_preedit_update(text, acp_start as usize);
+                        }
                     }
                 }
             }
@@ -363,7 +362,7 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
         log_debug(&format!("BeginUIElement: {}", dwuielementid));
         unsafe {
             if pbshow.is_null() {
-                return Err(Error::from_win32());
+                return Err(Error::from_hresult(HRESULT::from_win32(ERROR_INVALID_PARAMETER.0)));
             }
             *pbshow = BOOL(0);
 
@@ -449,7 +448,6 @@ impl ITfUIElementSink_Impl for CompositionHandler_Impl {
 
 #[implement(ITfCompartmentEventSink)]
 pub struct InputModeHandler {
-    ref_count: AtomicU32,
     input_ctx: *mut TsInputContextInner,
     comp_mgr: RefCell<Option<ITfCompartmentMgr>>,
     mode: RefCell<Option<ITfCompartment>>,
@@ -460,7 +458,6 @@ pub struct InputModeHandler {
 impl InputModeHandler {
     pub fn new(input_ctx: *mut TsInputContextInner) -> Self {
         Self {
-            ref_count: AtomicU32::new(1),
             input_ctx,
             comp_mgr: RefCell::new(None),
             mode: RefCell::new(None),
@@ -471,6 +468,8 @@ impl InputModeHandler {
 
     pub fn initialize(&self, thread_mgr: &ITfThreadMgr) -> Result<()> {
         unsafe {
+            let inner = &*self.input_ctx;
+            
             let comp_mgr: ITfCompartmentMgr = thread_mgr.cast()?;
             *self.comp_mgr.borrow_mut() = Some(comp_mgr.clone());
 
@@ -481,8 +480,9 @@ impl InputModeHandler {
             *self.input_mode.borrow_mut() = InputMode::Alpha;
 
             let source: ITfSource = mode.cast()?;
-            let unknown: IUnknown = self.cast()?;
-            let cookie = source.AdviseSink(&IID_ITfCompartmentEventSink, &unknown)?;
+            // Get IUnknown from our ComObject
+            let unknown: IUnknown = inner.input_mode_handler.to_interface();
+            let cookie = source.AdviseSink(&ITfCompartmentEventSink::IID, &unknown)?;
             *self.cookie.borrow_mut() = cookie;
 
             Ok(())
@@ -549,9 +549,9 @@ pub struct TsInputContextInner {
     pub input_mode_cb: Option<InputModeCallback>,
     pub input_source_cb: Option<InputSourceCallback>,
     pub candidate_config: CandidateConfig,
-    pub context_owner: ContextOwner,
-    pub composition_handler: CompositionHandler,
-    pub input_mode_handler: InputModeHandler,
+    pub context_owner: ComObject<ContextOwner>,
+    pub composition_handler: ComObject<CompositionHandler>,
+    pub input_mode_handler: ComObject<InputModeHandler>,
 }
 
 // ============================================================================
@@ -574,14 +574,21 @@ impl TsInputContext {
             return None;
         }
 
+        // Check if we're on the main thread (required for TSF STA)
+        // In Java, the main thread is typically the UI thread
+        let current_thread_id = std::thread::current().id();
+        log_debug(&format!("Initializing TSF on thread: {:?}", current_thread_id));
+
         unsafe {
             let hwnd = HWND(hwnd as *mut _);
 
             // Initialize COM with COINIT_APARTMENTTHREADED for STA
+            // This MUST be called on the same thread that will use TSF
             let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             // RPC_E_CHANGED_MODE (0x80010106 = -2147417850) is OK, means COM already initialized
             if !hr.is_ok() && hr.0 != -2147417850 {
                 log_error(&format!("Failed to initialize COM: 0x{:08X}", hr.0 as u32));
+                log_error("TSF requires initialization on the UI thread (STA)");
                 return None;
             }
 
@@ -669,6 +676,11 @@ impl TsInputContext {
             }
 
             log_debug("Creating handlers");
+            // Create handlers wrapped in ComObject for proper COM identity
+            let context_owner = ComObject::new(ContextOwner::new(std::ptr::null_mut()));
+            let composition_handler = ComObject::new(CompositionHandler::new(std::ptr::null_mut()));
+            let input_mode_handler = ComObject::new(InputModeHandler::new(std::ptr::null_mut()));
+            
             let inner = Box::new(TsInputContextInner {
                 hwnd,
                 thread_mgr: Some(thread_mgr.clone()),
@@ -685,54 +697,76 @@ impl TsInputContext {
                 input_mode_cb: None,
                 input_source_cb: None,
                 candidate_config: CandidateConfig::default(),
-                context_owner: ContextOwner::new(std::ptr::null_mut()),
-                composition_handler: CompositionHandler::new(std::ptr::null_mut()),
-                input_mode_handler: InputModeHandler::new(std::ptr::null_mut()),
+                context_owner,
+                composition_handler,
+                input_mode_handler,
             });
 
             let inner_ptr = Box::into_raw(inner);
 
-            (*inner_ptr).context_owner.input_ctx = inner_ptr;
-            (*inner_ptr).composition_handler.input_ctx = inner_ptr;
-            (*inner_ptr).input_mode_handler.input_ctx = inner_ptr;
+            // Set input_ctx pointers for handlers to access their parent
+            // We need to use get_mut() on ComObject to modify the inner struct
+            if let Some(mut owner) = (*inner_ptr).context_owner.get_mut() {
+                owner.input_ctx = inner_ptr;
+            }
+            if let Some(mut handler) = (*inner_ptr).composition_handler.get_mut() {
+                handler.input_ctx = inner_ptr;
+            }
+            if let Some(mut handler) = (*inner_ptr).input_mode_handler.get_mut() {
+                handler.input_ctx = inner_ptr;
+            }
 
             log_debug("Creating context");
             if let Some(ref doc_mgr) = doc_mgr {
-                // Create context with CompositionHandler as sink
-                let comp_sink: ITfContextOwnerCompositionSink = (&(*inner_ptr).composition_handler).cast().ok()?;
+                // Create context without composition sink for now
+                log_info("Composition sink registration deferred");
                 let mut edit_cookie = 0u32;
                 
-                if let Err(e) = doc_mgr.CreateContext(client_id, 0, &comp_sink, &mut (*inner_ptr).ctx, &mut edit_cookie) {
+                log_debug("Calling CreateContext...");
+                if let Err(e) = doc_mgr.CreateContext(client_id, 0, None, &mut (*inner_ptr).ctx, &mut edit_cookie) {
                     log_error(&format!("Failed to create context: {}", e));
                     return None;
                 }
+                log_debug("CreateContext succeeded");
 
                 // Push context to document manager FIRST (required for Win11)
                 if let Some(ref ctx) = (*inner_ptr).ctx {
+                    log_debug("Pushing context to document manager...");
                     if let Err(e) = doc_mgr.Push(ctx) {
                         log_error(&format!("Failed to push context: {}", e));
                         return None;
                     }
+                    log_debug("Push context succeeded");
                 }
 
                 // Then initialize handlers
                 if let Some(ref ctx) = (*inner_ptr).ctx {
-                    if let Err(e) = (&(*inner_ptr).composition_handler).initialize(ctx, client_id) {
+                    log_debug("Initializing composition handler...");
+                    if let Err(e) = (*inner_ptr).composition_handler.get().initialize(ctx, client_id) {
                         log_warn(&format!("Failed to initialize composition handler: {}", e));
+                    } else {
+                        log_debug("Composition handler initialized");
                     }
 
                     // Register ITfContextOwner using ITfSource::AdviseSink
-                    let owner: ITfContextOwner = (&(*inner_ptr).context_owner).cast().ok()?;
+                    log_debug("Registering ITfContextOwner...");
+                    let owner: ITfContextOwner = (*inner_ptr).context_owner.to_interface();
                     let source: ITfSource = ctx.cast().ok()?;
                     let unknown: IUnknown = owner.cast().ok()?;
-                    if let Err(e) = source.AdviseSink(&IID_ITfContextOwner, &unknown) {
-                        log_warn(&format!("Failed to advise context owner sink: {}", e));
+                    if let Err(e) = source.AdviseSink(&ITfContextOwner::IID, &unknown) {
+                        log_warn(&format!("Failed to register context owner sink: {}", e));
+                    } else {
+                        log_debug("ITfContextOwner registered successfully");
                     }
                 }
             }
 
-            if let Err(e) = (&(*inner_ptr).input_mode_handler).initialize(&thread_mgr) {
+            // Initialize input mode handler
+            log_debug("Initializing input mode handler...");
+            if let Err(e) = (*inner_ptr).input_mode_handler.get().initialize(&thread_mgr) {
                 log_warn(&format!("Failed to initialize input mode handler: {}", e));
+            } else {
+                log_debug("Input mode handler initialized");
             }
 
             log_info("TsInputContext created successfully");
@@ -751,7 +785,7 @@ impl InputContext for TsInputContext {
 
     fn get_input_mode(&self) -> InputMode {
         unsafe {
-            (*self.inner).input_mode_handler.get_input_mode()
+            (*self.inner).input_mode_handler.get().get_input_mode()
         }
     }
 
