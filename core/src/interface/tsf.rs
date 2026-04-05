@@ -16,7 +16,7 @@ use windows::{
     Win32::Graphics::Gdi::MapWindowPoints,
     Win32::System::Com::*,
     Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
-    Win32::System::Variant::VARIANT,
+    Win32::System::Variant::{VARIANT, VT_I4},
     Win32::UI::TextServices::*,
     Win32::UI::WindowsAndMessaging::GetWindowRect,
 };
@@ -732,9 +732,9 @@ impl InputModeHandler {
             // 获取初始模式
             let var = mode.GetValue();
             let initial_mode = if let Ok(var) = var {
-                // Try to get the iVal from VARIANT (VT_I4 = 3)
+                // TF_CONVERSIONMODE_NATIVE = 0x0001
                 let mode_val = var.Anonymous.Anonymous.Anonymous.intVal;
-                if mode_val == 0x0001 {
+                if (mode_val & 0x0001) != 0 {
                     InputMode::Native
                 } else {
                     InputMode::Alpha
@@ -773,13 +773,88 @@ impl InputModeHandler {
         self.input_mode.borrow().clone()
     }
 
+    pub fn force_alpha_mode(&self) {
+        unsafe {
+            let Some(ref mode) = *self.mode.borrow() else {
+                log_warn("force_alpha_mode: mode compartment unavailable");
+                return;
+            };
+
+            if let Ok(var) = mode.GetValue() {
+                let mode_val = var.Anonymous.Anonymous.Anonymous.intVal;
+                if (mode_val & 0x0001) == 0 {
+                    return;
+                }
+            }
+
+            let mut variant = VARIANT::default();
+            let variant_inner = &mut *variant.Anonymous.Anonymous;
+            variant_inner.vt = VT_I4;
+            variant_inner.Anonymous.intVal = 0;
+
+            let client_id = (*self.input_ctx).client_id;
+            if let Err(e) = mode.SetValue(client_id, &variant as *const _) {
+                log_warn(&format!(
+                    "force_alpha_mode: failed to set conversion compartment: {}",
+                    e
+                ));
+                return;
+            }
+
+            log_debug("force_alpha_mode: switched TSF mode to Alpha");
+            *self.input_mode.borrow_mut() = InputMode::Alpha;
+            if let Some(cb) = &(*self.input_ctx).input_mode_cb {
+                cb(InputMode::Alpha);
+            }
+        }
+    }
+
+    pub fn force_native_mode(&self) {
+        unsafe {
+            let Some(ref mode) = *self.mode.borrow() else {
+                log_warn("force_native_mode: mode compartment unavailable");
+                return;
+            };
+
+            let next_mode_val = if let Ok(var) = mode.GetValue() {
+                let mode_val = var.Anonymous.Anonymous.Anonymous.intVal;
+                if (mode_val & 0x0001) != 0 {
+                    return;
+                }
+                mode_val | 0x0001
+            } else {
+                0x0001
+            };
+
+            let mut variant = VARIANT::default();
+            let variant_inner = &mut *variant.Anonymous.Anonymous;
+            variant_inner.vt = VT_I4;
+            variant_inner.Anonymous.intVal = next_mode_val;
+
+            let client_id = (*self.input_ctx).client_id;
+            if let Err(e) = mode.SetValue(client_id, &variant as *const _) {
+                log_warn(&format!(
+                    "force_native_mode: failed to set conversion compartment: {}",
+                    e
+                ));
+                return;
+            }
+
+            log_debug("force_native_mode: switched TSF mode to Native");
+            *self.input_mode.borrow_mut() = InputMode::Native;
+            if let Some(cb) = &(*self.input_ctx).input_mode_cb {
+                cb(InputMode::Native);
+            }
+        }
+    }
+
     fn notify_input_mode_change(&self) {
         unsafe {
             if let Some(ref mode) = *self.mode.borrow() {
                 let var = mode.GetValue();
                 if let Ok(var) = var {
                     let mode_val = var.Anonymous.Anonymous.Anonymous.intVal;
-                    let new_mode = if mode_val == 0x0001 {
+                    let new_mode = if (mode_val & 0x0001) != 0 {
                         InputMode::Native // TF_CONVERSIONMODE_NATIVE
                     } else {
                         InputMode::Alpha // TF_CONVERSIONMODE_ALPHANUMERIC
@@ -1133,6 +1208,30 @@ impl InputContext for TsInputContext {
                     }
                 }
             }
+        }
+    }
+
+    fn force_alpha_mode(&mut self) {
+        unsafe {
+            if !(*self.inner).activated {
+                return;
+            }
+            (*self.inner)
+                .input_mode_handler
+                .get()
+                .force_alpha_mode();
+        }
+    }
+
+    fn force_native_mode(&mut self) {
+        unsafe {
+            if !(*self.inner).activated {
+                return;
+            }
+            (*self.inner)
+                .input_mode_handler
+                .get()
+                .force_native_mode();
         }
     }
 

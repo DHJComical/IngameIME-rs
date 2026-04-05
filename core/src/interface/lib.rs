@@ -90,6 +90,12 @@ pub trait InputContext {
     /// Set if the input method is activated.
     fn set_activated(&mut self, activated: bool);
 
+    /// Force switch to English/alphanumeric input mode.
+    fn force_alpha_mode(&mut self) {}
+
+    /// Force switch to native (non-English) input mode.
+    fn force_native_mode(&mut self) {}
+
     /// Sets the rectangle area for positioning candidate window.
     fn set_preedit_rect(&mut self, x: i32, y: i32, width: i32, height: i32);
 

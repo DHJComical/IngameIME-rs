@@ -6,10 +6,12 @@ use windows::core::w;
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::UI::Input::Ime::{
     ImmAssociateContext, ImmCreateContext, ImmDestroyContext, ImmGetCandidateListW, ImmGetCompositionStringW, ImmGetConversionStatus, ImmNotifyIME,
+    ImmSetConversionStatus,
     ImmSetCandidateWindow, ImmSetCompositionWindow, ImmSetOpenStatus, CANDIDATEFORM, CANDIDATELIST,
     CFS_EXCLUDE, CFS_RECT, COMPOSITIONFORM, CPS_CANCEL,
     GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR,
     HIMC, IME_CMODE_NATIVE, IME_COMPOSITION_STRING, IME_CONVERSION_MODE,
+    IME_SENTENCE_MODE,
     IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_OPENCANDIDATE, IMN_SETCONVERSIONMODE,
     ISC_SHOWUICANDIDATEWINDOW, ISC_SHOWUICOMPOSITIONWINDOW, NI_COMPOSITIONSTR,
 };
@@ -450,6 +452,72 @@ impl InputContext for Imm32InputContext {
                         cb(CandidateEvent::End);
                     }
                 }
+            }
+        }
+    }
+
+    fn force_alpha_mode(&mut self) {
+        unsafe {
+            let mut conversion = IME_CONVERSION_MODE(0);
+            let mut sentence = IME_SENTENCE_MODE(0);
+
+            if !ImmGetConversionStatus(
+                self.himc,
+                Some(&mut conversion as *mut _),
+                Some(&mut sentence as *mut _),
+            )
+            .as_bool()
+            {
+                log_warn("force_alpha_mode: ImmGetConversionStatus failed");
+                return;
+            }
+
+            if !conversion.contains(IME_CMODE_NATIVE) {
+                return;
+            }
+
+            let next_conversion = IME_CONVERSION_MODE(conversion.0 & !IME_CMODE_NATIVE.0);
+            if !ImmSetConversionStatus(self.himc, next_conversion, sentence).as_bool() {
+                log_warn("force_alpha_mode: ImmSetConversionStatus failed");
+                return;
+            }
+
+            log_debug("force_alpha_mode: switched to Alpha mode");
+            if let Some(cb) = &self.input_mode_cb {
+                cb(InputMode::Alpha);
+            }
+        }
+    }
+
+    fn force_native_mode(&mut self) {
+        unsafe {
+            let mut conversion = IME_CONVERSION_MODE(0);
+            let mut sentence = IME_SENTENCE_MODE(0);
+
+            if !ImmGetConversionStatus(
+                self.himc,
+                Some(&mut conversion as *mut _),
+                Some(&mut sentence as *mut _),
+            )
+            .as_bool()
+            {
+                log_warn("force_native_mode: ImmGetConversionStatus failed");
+                return;
+            }
+
+            if conversion.contains(IME_CMODE_NATIVE) {
+                return;
+            }
+
+            let next_conversion = IME_CONVERSION_MODE(conversion.0 | IME_CMODE_NATIVE.0);
+            if !ImmSetConversionStatus(self.himc, next_conversion, sentence).as_bool() {
+                log_warn("force_native_mode: ImmSetConversionStatus failed");
+                return;
+            }
+
+            log_debug("force_native_mode: switched to Native mode");
+            if let Some(cb) = &self.input_mode_cb {
+                cb(InputMode::Native);
             }
         }
     }

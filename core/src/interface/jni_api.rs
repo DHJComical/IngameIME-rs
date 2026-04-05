@@ -250,6 +250,34 @@ pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1lib
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1force_1alpha_1mode(
+    _env: EnvUnowned,
+    _class: JClass,
+    ptr: jlong,
+) {
+    if ptr != 0 {
+        unsafe {
+            let wrapper = &mut *(ptr as *mut ImeContext);
+            wrapper.ctx.force_alpha_mode();
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1force_1native_1mode(
+    _env: EnvUnowned,
+    _class: JClass,
+    ptr: jlong,
+) {
+    if ptr != 0 {
+        unsafe {
+            let wrapper = &mut *(ptr as *mut ImeContext);
+            wrapper.ctx.force_native_mode();
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_dhj_ingameime_rust_RustImeLibrary_rust_1ime_1library_1set_1pre_1edit_1rect(
     _env: EnvUnowned,
     _class: JClass,
